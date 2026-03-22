@@ -82,7 +82,7 @@ public class GenericJdbcTableSource extends JdbcTableSource implements GenericJd
                         .createJdbcConnection()) {
 
                     // Query the table cardinality.
-                    final String sql = String.format("SELECT count(*) FROM %s;", GenericJdbcTableSource.this.getTableName());
+                    final String sql = String.format("SELECT count(*) FROM %s", GenericJdbcTableSource.this.getTableName());
                     final ResultSet resultSet = connection.createStatement().executeQuery(sql);
                     if (!resultSet.next()) {
                         throw new SQLException("No query result for \"" + sql + "\".");
