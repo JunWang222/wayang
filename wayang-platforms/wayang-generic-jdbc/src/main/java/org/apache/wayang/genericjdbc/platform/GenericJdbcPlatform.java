@@ -54,6 +54,14 @@ public class GenericJdbcPlatform extends JdbcPlatformTemplate {
         super(PLATFORM_NAME, CONFIG_NAME);
     }
 
+    /**
+     * Constructor for subclasses that want their own platform name and config namespace.
+     * (e.g. {@code TrinoPlatform} uses {@code "trino"}, {@code BigQueryPlatform} uses {@code "bigquery"})
+     */
+    protected GenericJdbcPlatform(String platformName, String configName) {
+        super(platformName, configName);
+    }
+
     @Override
     public Executor.Factory getExecutorFactory() {
         return job -> new GenericJdbcExecutor(this, job);

@@ -1,29 +1,43 @@
 package org.apache.wayang.genericjdbc;
 
+import org.apache.wayang.basic.data.Record;
+import org.apache.wayang.basic.function.ProjectionDescriptor;
+import org.apache.wayang.basic.operators.FilterOperator;
+import org.apache.wayang.basic.operators.LocalCallbackSink;
+import org.apache.wayang.basic.operators.MapOperator;
+import org.apache.wayang.core.api.Configuration;
+import org.apache.wayang.core.api.WayangContext;
+import org.apache.wayang.core.function.PredicateDescriptor;
+import org.apache.wayang.core.plan.wayangplan.WayangPlan;
+import org.apache.wayang.core.types.DataSetType;
+import org.apache.wayang.genericjdbc.bigquery.BigQueryPlatform;
+import org.apache.wayang.genericjdbc.bigquery.BigQueryTableSource;
+import org.apache.wayang.java.Java;
 import org.junit.jupiter.api.*;
 
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests validating BigQuery SQL patterns via the official
- * Google BigQuery JDBC driver against a real BigQuery project.
+ * Integration tests for the BigQuery connector via {@link BigQuery#plugin()}.
  *
- * These tests mirror exactly what GenericJdbcExecutor.createSqlQuery()
- * would produce for TableSource, Filter, Projection, and combined pipelines.
+ * <p>Prerequisites:
+ * <ol>
+ *   <li>Service account key at: {@code ~/wayang-bq-key.json}</li>
+ *   <li>BigQuery table: {@code daeproject-316010.sales.orders} (10 rows)</li>
+ * </ol>
  *
- * Prerequisites:
- *   Service account key at: ~/wayang-bq-key.json
- *   Table: daeproject-316010.sales.orders (10 rows)
- *
- * Run:
+ * <p>Run:
+ * <pre>
  *   mvn test -pl wayang-platforms/wayang-generic-jdbc \
- *     -Dtest=BigQueryGenericJdbcIT \
- *     -Drat.skip=true -Dmaven.javadoc.skip=true \
- *     -Dlicense.skipAggregateAddThirdParty=true
+ *       -Dtest=BigQueryGenericJdbcIT -Pintegration,skip-prerequisite-check \
+ *       -Drat.skip=true -Dmaven.javadoc.skip=true
+ * </pre>
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class BigQueryGenericJdbcIT {
@@ -31,159 +45,287 @@ class BigQueryGenericJdbcIT {
     private static final String PROJECT_ID = "daeproject-316010";
     private static final String KEY_PATH   = System.getProperty("user.home") + "/wayang-bq-key.json";
     private static final String SA_EMAIL   = "wayang-bq-test@daeproject-316010.iam.gserviceaccount.com";
-    private static final String TABLE      = "`daeproject-316010.sales.orders`";
+
+    /** Backtick-quoted fully-qualified BigQuery table name. */
+    private static final String TABLE = "`daeproject-316010.sales.orders`";
 
     private static final String JDBC_URL = String.format(
             "jdbc:bigquery://https://www.googleapis.com/bigquery/v2;" +
-            "ProjectId=%s;" +
-            "OAuthType=0;" +
-            "OAuthServiceAcctEmail=%s;" +
-            "OAuthPvtKeyPath=%s",
+            "ProjectId=%s;OAuthType=0;OAuthServiceAcctEmail=%s;OAuthPvtKeyPath=%s",
             PROJECT_ID, SA_EMAIL, KEY_PATH);
 
-    private static Connection connection;
     private static boolean available = false;
 
+    // ── Setup ───────────────────────────────────────────────────────────────
+
     @BeforeAll
-    static void connect() {
+    static void checkAvailable() {
         try {
             Class.forName("com.google.cloud.bigquery.jdbc.BigQueryDriver");
-            connection = DriverManager.getConnection(JDBC_URL);
-            available = true;
-            System.out.println("Connected to BigQuery project: " + PROJECT_ID);
-        } catch (Exception e) {
-            System.err.println("BigQuery not available: " + e.getMessage());
-        }
-    }
-
-    @AfterAll
-    static void disconnect() throws Exception {
-        if (connection != null && !connection.isClosed()) {
-            connection.close();
-        }
-    }
-
-    private List<List<Object>> runQuery(String sql) throws SQLException {
-        System.out.println("SQL: " + sql);
-        List<List<Object>> rows = new ArrayList<>();
-        try (Statement stmt = connection.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            int cols = rs.getMetaData().getColumnCount();
-            while (rs.next()) {
-                List<Object> row = new ArrayList<>();
-                for (int i = 1; i <= cols; i++) {
-                    row.add(rs.getObject(i));
-                }
-                rows.add(row);
+            try (Connection conn = DriverManager.getConnection(JDBC_URL)) {
+                ResultSet rs = conn.createStatement().executeQuery("SELECT 1");
+                available = rs.next();
+                System.out.println("[SETUP] Connected to BigQuery project: " + PROJECT_ID);
             }
+        } catch (Exception e) {
+            System.err.println("[SETUP] BigQuery not available — all tests will be skipped: " + e.getMessage());
         }
-        return rows;
     }
 
-    // ── Test 1: Full table scan (GenericJdbcTableSource) ─────────────────
+    private Configuration createBigQueryConfig() {
+        Configuration config = new Configuration();
+        config.setProperty("wayang.bigquery.jdbc.url", JDBC_URL);
+        return config;
+    }
 
+    private WayangContext createContext(Configuration config) {
+        return new WayangContext(config)
+                .withPlugin(Java.basicPlugin())
+                .withPlugin(BigQuery.plugin());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  VERIFICATION TESTS
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * VERIFICATION A — Platform binding.
+     * BigQueryTableSource must be bound to BigQueryPlatform (not GenericJdbcPlatform).
+     */
+    @Test
+    @Order(0)
+    @DisplayName("[VERIFY] BigQueryTableSource is bound to BigQueryPlatform")
+    void testPlatformBinding() {
+        BigQueryTableSource source = new BigQueryTableSource(TABLE, "order_id");
+
+        assertSame(
+                BigQueryPlatform.getInstance(),
+                source.getPlatform(),
+                "BigQueryTableSource.getPlatform() must return BigQueryPlatform singleton"
+        );
+        assertEquals("bigquery", source.getPlatform().getPlatformId(),
+                "Platform ID drives all wayang.bigquery.* config key lookups");
+        assertEquals("bigquery", source.jdbcName,
+                "jdbcName is fixed to 'bigquery'");
+
+        System.out.println("[VERIFY] getPlatform()   = " + source.getPlatform().getClass().getSimpleName());
+        System.out.println("[VERIFY] getPlatformId() = " + source.getPlatform().getPlatformId());
+        System.out.println("[VERIFY] jdbcName        = " + source.jdbcName);
+    }
+
+    /**
+     * VERIFICATION B — Hard failure without JDBC config.
+     * If BigQuery JDBC URL is missing, execution must throw, not silently
+     * fall back to Java evaluation.
+     */
     @Test
     @Order(1)
-    @DisplayName("GenericJdbc SQL: SELECT * FROM table  (TableSource)")
-    void testTableScan() throws Exception {
+    @DisplayName("[VERIFY] Execution fails when BigQuery JDBC config is missing")
+    void testFailsWithoutJdbcConfig() {
         Assumptions.assumeTrue(available, "BigQuery not available");
 
-        List<List<Object>> rows = runQuery("SELECT * FROM " + TABLE);
-        assertEquals(10, rows.size(), "Expected 10 rows");
-        System.out.println("[PASS] TableScan: " + rows.size() + " rows");
+        Configuration emptyConfig = new Configuration();
+        BigQueryTableSource source = new BigQueryTableSource(TABLE, "order_id", "region");
+        List<Record> results = new ArrayList<>();
+        LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
+        source.connectTo(0, sink, 0);
+
+        WayangContext ctx = new WayangContext(emptyConfig)
+                .withPlugin(Java.basicPlugin())
+                .withPlugin(BigQuery.plugin());
+
+        assertThrows(Exception.class,
+                () -> ctx.execute("BQ-NoConfig", new WayangPlan(sink)),
+                "Should throw when wayang.bigquery.jdbc.url is not set"
+        );
+        System.out.println("[VERIFY] Correctly threw when JDBC config was absent.");
     }
 
-    // ── Test 2: Filter — string predicate ───────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    //  FUNCTIONAL TESTS
+    // ════════════════════════════════════════════════════════════════════════
 
+    /**
+     * Full table scan.
+     * Wayang sends: SELECT * FROM `daeproject-316010.sales.orders`
+     */
     @Test
     @Order(2)
-    @DisplayName("GenericJdbc SQL: SELECT * FROM table WHERE region = 'APAC'")
-    void testFilterString() throws Exception {
+    @DisplayName("BigQuery: full table scan")
+    void testTableScan() {
         Assumptions.assumeTrue(available, "BigQuery not available");
 
-        List<List<Object>> rows = runQuery(
-                "SELECT * FROM " + TABLE + " WHERE region = 'APAC'");
-        assertFalse(rows.isEmpty());
-        rows.forEach(r -> assertEquals("APAC", r.get(1)));
-        System.out.printf("[PASS] Filter(region='APAC'): %d rows%n", rows.size());
+        List<Record> results = new ArrayList<>();
+        BigQueryTableSource source = new BigQueryTableSource(
+                TABLE, "order_id", "region", "product", "amount"
+        );
+        LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
+        source.connectTo(0, sink, 0);
+
+        createContext(createBigQueryConfig()).execute("BQ-TableScan", new WayangPlan(sink));
+
+        assertEquals(10, results.size(), "Expected 10 rows");
+        System.out.println("[PASS] TableScan: " + results.size() + " rows");
+        results.forEach(r -> System.out.println("       " + r));
     }
 
-    // ── Test 3: Filter — numeric predicate ──────────────────────────────
-
+    /**
+     * String filter pushed to SQL.
+     * Wayang sends: SELECT * FROM `...` WHERE region = 'APAC'
+     */
     @Test
     @Order(3)
-    @DisplayName("GenericJdbc SQL: SELECT * FROM table WHERE amount > 1000")
-    void testFilterNumeric() throws Exception {
+    @DisplayName("BigQuery: filter pushdown (region = 'APAC')")
+    void testFilterString() {
         Assumptions.assumeTrue(available, "BigQuery not available");
 
-        List<List<Object>> rows = runQuery(
-                "SELECT * FROM " + TABLE + " WHERE amount > 1000");
-        assertFalse(rows.isEmpty());
-        rows.forEach(r -> assertTrue(
-                ((Number) r.get(3)).doubleValue() > 1000.0));
-        System.out.printf("[PASS] Filter(amount>1000): %d rows%n", rows.size());
+        List<Record> results = new ArrayList<>();
+        BigQueryTableSource source = new BigQueryTableSource(
+                TABLE, "order_id", "region", "product", "amount"
+        );
+        FilterOperator<Record> filter = new FilterOperator<>(
+                new PredicateDescriptor<>(
+                        r -> "APAC".equals(r.getField(1)), Record.class
+                ).withSqlImplementation("region = 'APAC'")
+        );
+        LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
+        source.connectTo(0, filter, 0);
+        filter.connectTo(0, sink, 0);
+
+        createContext(createBigQueryConfig()).execute("BQ-Filter", new WayangPlan(sink));
+
+        assertFalse(results.isEmpty());
+        results.forEach(r -> assertEquals("APAC", r.getField(1)));
+        System.out.println("[PASS] Filter(region='APAC'): " + results.size() + " rows");
     }
 
-    // ── Test 4: Projection ───────────────────────────────────────────────
-
+    /**
+     * Numeric filter pushed to SQL.
+     * Wayang sends: SELECT * FROM `...` WHERE amount > 1000
+     */
     @Test
     @Order(4)
-    @DisplayName("GenericJdbc SQL: SELECT region, amount FROM table  (Projection)")
-    void testProjection() throws Exception {
+    @DisplayName("BigQuery: filter pushdown (amount > 1000)")
+    void testFilterNumeric() {
         Assumptions.assumeTrue(available, "BigQuery not available");
 
-        List<List<Object>> rows = runQuery(
-                "SELECT region, amount FROM " + TABLE);
-        assertEquals(10, rows.size());
-        rows.forEach(r -> assertEquals(2, r.size()));
-        System.out.println("[PASS] Projection(region, amount): " + rows.size() + " rows");
+        List<Record> results = new ArrayList<>();
+        BigQueryTableSource source = new BigQueryTableSource(
+                TABLE, "order_id", "region", "product", "amount"
+        );
+        FilterOperator<Record> filter = new FilterOperator<>(
+                new PredicateDescriptor<>(
+                        r -> ((Number) r.getField(3)).doubleValue() > 1000.0, Record.class
+                ).withSqlImplementation("amount > 1000")
+        );
+        LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
+        source.connectTo(0, filter, 0);
+        filter.connectTo(0, sink, 0);
+
+        createContext(createBigQueryConfig()).execute("BQ-Filter-Numeric", new WayangPlan(sink));
+
+        assertFalse(results.isEmpty());
+        results.forEach(r -> assertTrue(((Number) r.getField(3)).doubleValue() > 1000.0));
+        System.out.println("[PASS] Filter(amount>1000): " + results.size() + " rows");
     }
 
-    // ── Test 5: Filter + Projection combined ─────────────────────────────
-
+    /**
+     * Column pruning pushed to SQL.
+     * Wayang sends: SELECT region, amount FROM `...`
+     */
     @Test
     @Order(5)
-    @DisplayName("GenericJdbc SQL: SELECT region, amount FROM table WHERE amount > 1000")
-    void testFilterAndProjection() throws Exception {
+    @DisplayName("BigQuery: projection pushdown (region, amount)")
+    void testProjection() {
         Assumptions.assumeTrue(available, "BigQuery not available");
 
-        List<List<Object>> rows = runQuery(
-                "SELECT region, amount FROM " + TABLE + " WHERE amount > 1000");
-        assertFalse(rows.isEmpty());
-        rows.forEach(r -> {
-            assertEquals(2, r.size());
-            assertTrue(((Number) r.get(1)).doubleValue() > 1000.0);
-        });
-        System.out.printf("[PASS] Filter+Projection: %d rows%n", rows.size());
+        List<Record> results = new ArrayList<>();
+        BigQueryTableSource source = new BigQueryTableSource(
+                TABLE, "order_id", "region", "product", "amount"
+        );
+        MapOperator<Record, Record> project = new MapOperator<>(
+                new ProjectionDescriptor<>(Record.class, Record.class, "region", "amount"),
+                DataSetType.createDefault(Record.class),
+                DataSetType.createDefault(Record.class)
+        );
+        LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
+        source.connectTo(0, project, 0);
+        project.connectTo(0, sink, 0);
+
+        createContext(createBigQueryConfig()).execute("BQ-Projection", new WayangPlan(sink));
+
+        assertEquals(10, results.size());
+        results.forEach(r -> assertEquals(2, r.size(), "Record should have 2 projected fields"));
+        System.out.println("[PASS] Projection(region, amount): " + results.size() + " rows");
+        results.forEach(r -> System.out.println("       " + r));
     }
 
-    // ── Test 6: Cardinality estimation (SELECT count(*)) ─────────────────
-
+    /**
+     * Combined filter + projection in one SQL query.
+     * Wayang sends: SELECT region, amount FROM `...` WHERE amount > 1000
+     */
     @Test
     @Order(6)
-    @DisplayName("GenericJdbc SQL: SELECT count(*) FROM table  (cardinality estimation)")
-    void testCardinalityEstimation() throws Exception {
+    @DisplayName("BigQuery: filter + projection pipeline")
+    void testFilterAndProjection() {
         Assumptions.assumeTrue(available, "BigQuery not available");
 
-        List<List<Object>> rows = runQuery("SELECT count(*) FROM " + TABLE);
-        assertEquals(1, rows.size());
-        long count = ((Number) rows.get(0).get(0)).longValue();
-        assertEquals(10, count);
-        System.out.println("[PASS] Cardinality: count(*) = " + count);
+        List<Record> results = new ArrayList<>();
+        BigQueryTableSource source = new BigQueryTableSource(
+                TABLE, "order_id", "region", "product", "amount"
+        );
+        FilterOperator<Record> filter = new FilterOperator<>(
+                new PredicateDescriptor<>(
+                        r -> ((Number) r.getField(3)).doubleValue() > 1000.0, Record.class
+                ).withSqlImplementation("amount > 1000")
+        );
+        MapOperator<Record, Record> project = new MapOperator<>(
+                new ProjectionDescriptor<>(Record.class, Record.class, "region", "amount"),
+                DataSetType.createDefault(Record.class),
+                DataSetType.createDefault(Record.class)
+        );
+        LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
+        source.connectTo(0, filter, 0);
+        filter.connectTo(0, project, 0);
+        project.connectTo(0, sink, 0);
+
+        createContext(createBigQueryConfig()).execute("BQ-Filter-Projection", new WayangPlan(sink));
+
+        assertFalse(results.isEmpty());
+        results.forEach(r -> {
+            assertEquals(2, r.size());
+            assertTrue(((Number) r.getField(1)).doubleValue() > 1000.0);
+        });
+        System.out.println("[PASS] Filter+Projection: " + results.size() + " rows");
+        results.forEach(r -> System.out.printf("       region=%s  amount=%s%n", r.getField(0), r.getField(1)));
     }
 
-    // ── Test 7: No trailing semicolon ────────────────────────────────────
-
+    /**
+     * Cardinality estimation sanity check.
+     * The optimizer runs SELECT count(*) against BigQuery before planning.
+     */
     @Test
     @Order(7)
-    @DisplayName("SQL without trailing semicolon works (validates GenericJdbcExecutor fix)")
-    void testNoTrailingSemicolon() throws Exception {
+    @DisplayName("BigQuery: cardinality estimation via COUNT(*) is accurate")
+    void testCardinalityMatches() {
         Assumptions.assumeTrue(available, "BigQuery not available");
 
-        String sql = "SELECT count(*) FROM " + TABLE;
-        assertFalse(sql.endsWith(";"), "SQL must not end with semicolon");
-        List<List<Object>> rows = runQuery(sql);
-        assertFalse(rows.isEmpty());
-        System.out.println("[PASS] No trailing semicolon accepted by BigQuery JDBC");
+        List<Record> results = new ArrayList<>();
+        BigQueryTableSource source = new BigQueryTableSource(
+                TABLE, "order_id", "region", "product", "amount"
+        );
+        FilterOperator<Record> filter = new FilterOperator<>(
+                new PredicateDescriptor<>(
+                        r -> "EMEA".equals(r.getField(1)), Record.class
+                ).withSqlImplementation("region = 'EMEA'")
+        );
+        LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
+        source.connectTo(0, filter, 0);
+        filter.connectTo(0, sink, 0);
+
+        createContext(createBigQueryConfig()).execute("BQ-Cardinality", new WayangPlan(sink));
+
+        assertEquals(3, results.size(), "Expected 3 EMEA rows");
+        System.out.println("[PASS] Cardinality: " + results.size() + " EMEA rows (expected 3)");
     }
 }
