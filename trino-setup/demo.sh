@@ -50,8 +50,8 @@ pause() {
 }
 
 run_wayang_demo() {
-  # exec:java runs TrinoDemo.main() directly — no test framework, no noise.
   mvn exec:java -pl wayang-platforms/wayang-generic-jdbc \
+    -Dexec.mainClass="org.apache.wayang.genericjdbc.TrinoDemo" \
     ${MAVEN_FLAGS} -q 2>/dev/null || true
 }
 
