@@ -37,6 +37,8 @@
         <java-module-name>org.apache.wayang.platform.genericjdbc</java-module-name>
         <postgres.version>42.7.2</postgres.version>
         <mysql.version>8.0.33</mysql.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
     </properties>
 
     <dependencies>
@@ -75,11 +77,22 @@
             <scope>compile</scope>
         </dependency>
 
-        <!-- Trino JDBC driver — enables GenericJdbc to connect to Trino -->
+        <!-- Trino JDBC driver -->
         <dependency>
             <groupId>io.trino</groupId>
             <artifactId>trino-jdbc</artifactId>
             <version>435</version>
+        </dependency>
+
+        <!-- BigQuery JDBC driver — shaded uber jar includes all transitive deps.
+             Do NOT add google-cloud-bigquery alongside this; the shaded classes
+             conflict with the non-shaded ones. -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-bigquery-jdbc</artifactId>
+            <version>0.6.0</version>
+            <classifier>all</classifier>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
