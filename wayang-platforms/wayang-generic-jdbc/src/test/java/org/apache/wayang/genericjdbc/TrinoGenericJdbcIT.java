@@ -387,7 +387,7 @@ class TrinoGenericJdbcIT {
 
         createContext(createTrinoConfig()).execute("Trino-TableScan", new WayangPlan(sink));
 
-        assertEquals(10, results.size(), "Expected 10 rows from iceberg.sales.orders");
+        assertEquals(20, results.size(), "Expected 20 rows from iceberg.sales.orders");
         System.out.println("[PASS] TableScan: " + results.size() + " rows");
         results.forEach(r -> System.out.println("       " + r));
     }

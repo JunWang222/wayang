@@ -5,7 +5,7 @@
 #  Demonstrates:
 #    Act 1 — Start Trino + Iceberg stack via Docker
 #    Act 2 — Query Iceberg data directly through Trino CLI
-#    Act 3 — Run the same queries via the Wayang API (optimizer + cost model)
+#    Act 3 — Run the same queries via the Wayang API (filter + projection)
 #
 #  Prerequisites:
 #    - Docker running
@@ -52,7 +52,7 @@ pause() {
 run_wayang_demo() {
   mvn exec:java -pl wayang-platforms/wayang-generic-jdbc \
     -Dexec.mainClass="org.apache.wayang.genericjdbc.TrinoDemo" \
-    ${MAVEN_FLAGS} -q 2>/dev/null || true
+    ${MAVEN_FLAGS}
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -87,7 +87,14 @@ echo "  ✓ Trino is ready at http://localhost:8080"
 step "1d. Initialising Iceberg tables (create + seed data)"
 docker exec -i "$TRINO_CONTAINER" trino < "$TRINO_SETUP/scripts/init.sql" 2>&1 \
   | grep -v "^WARNING\|jline\|org.jline" || true
-echo "  ✓ iceberg.sales.orders created and seeded with 10 rows"
+echo "  ✓ iceberg.sales.orders seeded with 20 rows (4 regions, 5 products)"
+
+step "1e. Table schema — iceberg.sales.orders"
+echo "  SQL: DESCRIBE iceberg.sales.orders"
+echo
+docker exec "$TRINO_CONTAINER" \
+  trino --execute "DESCRIBE iceberg.sales.orders" \
+        --output-format ALIGNED 2>/dev/null
 
 pause
 
@@ -96,6 +103,7 @@ pause
 # ═════════════════════════════════════════════════════════════════════════════
 banner "ACT 2 — Query Iceberg directly via Trino CLI"
 echo "  (No Wayang yet — plain SQL sent straight to Trino)"
+cd "$TRINO_SETUP"
 
 step "2a. Full table scan"
 echo "  SQL: SELECT * FROM iceberg.sales.orders"
@@ -104,36 +112,36 @@ docker exec "$TRINO_CONTAINER" \
   trino --execute "SELECT * FROM iceberg.sales.orders ORDER BY order_id" \
         --output-format ALIGNED 2>/dev/null
 
-step "2b. Filter: region = 'APAC'"
-echo "  SQL: SELECT * FROM iceberg.sales.orders WHERE region = 'APAC'"
+step "2b. Filter: region = 'AMER'"
+echo "  SQL: SELECT * FROM iceberg.sales.orders WHERE region = 'AMER'"
 echo
 docker exec "$TRINO_CONTAINER" \
-  trino --execute "SELECT * FROM iceberg.sales.orders WHERE region = 'APAC'" \
+  trino --execute "SELECT * FROM iceberg.sales.orders WHERE region = 'AMER' ORDER BY order_id" \
         --output-format ALIGNED 2>/dev/null
 
-step "2c. Aggregation by region"
-echo "  SQL: SELECT region, COUNT(*), SUM(amount) FROM iceberg.sales.orders GROUP BY region"
+step "2c. Projection: SELECT region, product, amount WHERE region = 'AMER'"
+echo "  SQL: SELECT region, product, amount FROM iceberg.sales.orders WHERE region = 'AMER'"
 echo
 docker exec "$TRINO_CONTAINER" \
   trino --execute \
-    "SELECT region, COUNT(*) AS orders, SUM(amount) AS total
+    "SELECT region, product, amount
      FROM iceberg.sales.orders
-     GROUP BY region
-     ORDER BY total DESC" \
+     WHERE region = 'AMER'
+     ORDER BY order_id" \
   --output-format ALIGNED 2>/dev/null
 
 pause
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  ACT 3 — Same data, via the Wayang API
+#  ACT 3 — Same operators via Wayang API
 # ═════════════════════════════════════════════════════════════════════════════
-banner "ACT 3 — Wayang API: optimizer + cost model"
-echo "  Now Wayang's optimizer decides how to execute each operator."
-echo "  It uses Trino because we registered Trino.plugin()."
+banner "ACT 3 — Wayang API: filter + projection pushdown"
+echo "  Wayang rewrites logical operators to Trino-specific physical operators"
+echo "  and generates SQL with WHERE + SELECT column pushdown."
 cd "$WAYANG_ROOT"
 
-step "Seg 3 + 4 — Cost model & end-to-end query via Wayang API"
-echo "  Running TrinoDemo.main() — real user code, no test framework."
+step "3. Running TrinoDemo filter + projection (Seg 3 + Seg 4)"
+echo "  Running TrinoDemo.main() — filter and projection operators demonstrated."
 echo
 run_wayang_demo
 

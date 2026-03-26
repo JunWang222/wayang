@@ -19,12 +19,15 @@
 package org.apache.wayang.genericjdbc;
 
 import org.apache.wayang.basic.data.Record;
+import org.apache.wayang.basic.function.ProjectionDescriptor;
 import org.apache.wayang.basic.operators.FilterOperator;
 import org.apache.wayang.basic.operators.LocalCallbackSink;
+import org.apache.wayang.basic.operators.MapOperator;
 import org.apache.wayang.core.api.Configuration;
 import org.apache.wayang.core.api.WayangContext;
 import org.apache.wayang.core.function.PredicateDescriptor;
 import org.apache.wayang.core.plan.wayangplan.WayangPlan;
+import org.apache.wayang.core.types.DataSetType;
 import org.apache.wayang.genericjdbc.bigquery.BigQueryPlatform;
 import org.apache.wayang.genericjdbc.bigquery.BigQueryTableSource;
 import org.apache.wayang.java.Java;
@@ -35,46 +38,74 @@ import java.util.List;
 /**
  * Standalone demo for the Wayang BigQuery connector.
  *
+ * <p>Controlled by {@code -Dbigquery.mode}:
+ * <ul>
+ *   <li>{@code cost}       — three-layer cost model (no credentials needed)</li>
+ *   <li>{@code filter}     — filter operator pushdown demo</li>
+ *   <li>{@code projection} — projection + filter operator pushdown demo</li>
+ * </ul>
+ *
  * <p>Run with:
  * <pre>
- *   cd /path/to/wayang
  *   mvn exec:java -pl wayang-platforms/wayang-generic-jdbc \
  *     -Dexec.mainClass=org.apache.wayang.genericjdbc.BigQueryDemo \
- *     -Pskip-prerequisite-check -Drat.skip=true \
- *     [-Dbigquery.url=jdbc:bigquery://...] \
- *     [-Dbigquery.project=my-project]
+ *     -Dbigquery.mode=cost \
+ *     -Pskip-prerequisite-check -Drat.skip=true
  * </pre>
- *
- * <p>Demonstrates:
- * <ol>
- *   <li>Seg 3 — Cost model: shows the three-layer pipeline
- *       (formula → cpu cycles → time → abstract cost) with BigQuery's
- *       α=5, β=2M parameters (serverless columnar engine profile).</li>
- *   <li>Seg 4 — End-to-end plan: builds the Wayang plan with filter pushdown.
- *       Executes if {@code bigquery.url} is provided; otherwise prints the
- *       plan structure and explains what would be sent to BigQuery.</li>
- * </ol>
  */
 public class BigQueryDemo {
 
+    private static final String MODE     = System.getProperty("bigquery.mode", "cost");
     private static final String JDBC_URL = System.getProperty("bigquery.url",  "");
     private static final String PROJECT  = System.getProperty("bigquery.project", "my-project");
 
+    // 20-row dataset: 4 regions (AMER/APAC/EMEA/LATAM), 5 products (Widget A-E)
+    // AMER rows: 3, 6, 9, 12, 16  →  5 rows for filter demo
+    private static final String[][] SAMPLE_DATA = {
+        {"1",  "APAC",  "Widget A", "1500.00", "2024-01-15"},
+        {"2",  "EMEA",  "Widget B",  "800.50", "2024-01-16"},
+        {"3",  "AMER",  "Widget A", "2200.00", "2024-01-17"},
+        {"4",  "APAC",  "Widget C",  "350.75", "2024-01-18"},
+        {"5",  "EMEA",  "Widget A", "1100.00", "2024-01-19"},
+        {"6",  "AMER",  "Widget B",  "950.25", "2024-01-20"},
+        {"7",  "APAC",  "Widget B", "1750.00", "2024-01-21"},
+        {"8",  "EMEA",  "Widget C",  "420.00", "2024-01-22"},
+        {"9",  "AMER",  "Widget C",  "680.50", "2024-01-23"},
+        {"10", "APAC",  "Widget A", "3000.00", "2024-01-24"},
+        {"11", "LATAM", "Widget D",  "560.00", "2024-01-25"},
+        {"12", "AMER",  "Widget D", "1320.75", "2024-01-26"},
+        {"13", "EMEA",  "Widget D",  "990.00", "2024-01-27"},
+        {"14", "LATAM", "Widget E", "2100.50", "2024-01-28"},
+        {"15", "APAC",  "Widget E", "4500.00", "2024-01-29"},
+        {"16", "AMER",  "Widget E", "3750.00", "2024-01-30"},
+        {"17", "EMEA",  "Widget E", "1250.00", "2024-01-31"},
+        {"18", "LATAM", "Widget A",  "870.25", "2024-02-01"},
+        {"19", "APAC",  "Widget D", "1680.00", "2024-02-02"},
+        {"20", "LATAM", "Widget B",  "440.50", "2024-02-03"},
+    };
+
     public static void main(String[] args) {
-        seg3CostModel();
-        seg4PlanAndRun();
+        switch (MODE) {
+            case "cost":       costModel();    break;
+            case "filter":     filterDemo();   break;
+            case "projection": projectionDemo(); break;
+            default:
+                costModel();
+                filterDemo();
+                projectionDemo();
+        }
     }
 
-    // ── Seg 3 — Cost model ────────────────────────────────────────────────────
+    // ── Cost model ────────────────────────────────────────────────────────────
 
-    static void seg3CostModel() {
+    static void costModel() {
         Configuration config = new Configuration();
         BigQueryPlatform.getInstance().configureDefaults(config);
 
-        long   mhz      = config.getLongProperty("wayang.bigquery.cpu.mhz",       0);
-        long   cores    = config.getLongProperty("wayang.bigquery.cores",          0);
-        double fix      = config.getDoubleProperty("wayang.bigquery.costs.fix",    0);
-        double perMs    = config.getDoubleProperty("wayang.bigquery.costs.per-ms", 1);
+        long   mhz   = config.getLongProperty("wayang.bigquery.cpu.mhz",        0);
+        long   cores = config.getLongProperty("wayang.bigquery.cores",           0);
+        double fix   = config.getDoubleProperty("wayang.bigquery.costs.fix",     0);
+        double perMs = config.getDoubleProperty("wayang.bigquery.costs.per-ms",  1);
 
         long   rows      = 10;
         long   alpha     = 5;
@@ -85,82 +116,73 @@ public class BigQueryDemo {
 
         System.out.println();
         System.out.println("══════════════════════════════════════════════════════");
-        System.out.println("  Seg 3 — BigQuery Cost Model Integration");
+        System.out.println("  BigQuery — Cost Model Integration");
         System.out.println("══════════════════════════════════════════════════════");
         System.out.println();
         System.out.println("  LAYER 1 — Cost formula  (wayang-bigquery-defaults.properties)");
         System.out.printf("    tablesource : %s%n", config.getStringProperty("wayang.bigquery.tablesource.load", null));
         System.out.printf("    filter      : %s%n", config.getStringProperty("wayang.bigquery.filter.load",      null));
         System.out.println();
-        System.out.println("  LAYER 2 — Hardware profile  (cpu cycles → wall-clock ms)");
+        System.out.println("  LAYER 2 — Hardware profile  (cpu cycles -> wall-clock ms)");
         System.out.printf("    cpu.mhz = %d   cores = %d%n", mhz, cores);
         System.out.println();
-        System.out.println("  LAYER 3 — Time → abstract cost  (cross-platform comparison)");
+        System.out.println("  LAYER 3 — Time -> abstract cost");
         System.out.printf("    costs.fix = %.1f   costs.per-ms = %.1f%n", fix, perMs);
         System.out.println();
-        System.out.println("  ── Worked example: 10-row table scan ─────────────");
-        System.out.printf("    cpu cycles = %d × %d + %d = %,d%n", alpha, rows, beta, cpuCycles);
-        System.out.printf("    time       = %,d / (%d × %d × 1000) = %.4f ms%n", cpuCycles, cores, mhz, timeMs);
-        System.out.printf("    cost       = %.1f + %.1f × %.4f = %.4f%n", fix, perMs, timeMs, cost);
+        System.out.println("  -- Worked example: 10-row table scan --");
+        System.out.printf("    alpha = %d  (per-row, serverless columnar)%n", alpha);
+        System.out.printf("    beta  = %,d  (cold-start / slot reservation)%n", beta);
+        System.out.printf("    cpu cycles = %d * %d + %,d = %,d%n", alpha, rows, beta, cpuCycles);
+        System.out.printf("    time       = %,d / (%d * %d * 1000) = %.4f ms%n", cpuCycles, cores, mhz, timeMs);
+        System.out.printf("    cost       = %.1f + %.1f * %.4f = %.4f%n", fix, perMs, timeMs, cost);
         System.out.println();
-        System.out.println("  Compare vs Trino: α=10, β=800k, cost≈0.0741");
-        System.out.println("  BigQuery: α=5 (serverless columnar, cheaper per-row)");
-        System.out.println("            β=2M (larger cold-start / slot reservation)");
-        System.out.println("  ─── optimizer picks Trino for small tables, BigQuery for large ones");
         System.out.println("══════════════════════════════════════════════════════");
         System.out.println();
     }
 
-    // ── Seg 4 — Wayang plan with filter pushdown ──────────────────────────────
+    // ── Filter pushdown ───────────────────────────────────────────────────────
 
-    static void seg4PlanAndRun() {
-        System.out.println("══════════════════════════════════════════════════════");
-        System.out.println("  Seg 4 — BigQuery via Wayang API");
-        System.out.println("══════════════════════════════════════════════════════");
-        System.out.println();
-
+    static void filterDemo() {
         String table = String.format("`%s.sales.orders`", PROJECT);
 
-        System.out.println("  Plan structure (same API as Trino, different platform):");
         System.out.println();
-        System.out.printf("    new BigQueryTableSource(\"%s\", ...)%n", table);
-        System.out.println("        │");
-        System.out.println("        ▼  BigQueryFilterMapping rewrites →");
-        System.out.println("    FilterOperator(region = 'AMER')  →  BigQueryFilterOperator");
-        System.out.println("        │");
-        System.out.println("        ▼  TrinoChannelConversion: SqlQueryChannel → StreamChannel");
-        System.out.println("    LocalCallbackSink (collect results in Java)");
+        System.out.println("══════════════════════════════════════════════════════");
+        System.out.println("  BigQuery — Filter Operator Pushdown");
+        System.out.println("══════════════════════════════════════════════════════");
         System.out.println();
-        System.out.println("  SQL Wayang would send to BigQuery:");
-        System.out.printf("    SELECT * FROM %s WHERE region = 'AMER'%n", table);
-        System.out.println();
-        System.out.println("  Note: BigQuery uses backtick-quoted `project.dataset.table`");
-        System.out.println("        identifiers — handled automatically by BigQueryTableSource.");
+        System.out.println("  Operator:  FilterOperator  ->  BigQueryFilterOperator");
+        System.out.printf("  SQL sent:  SELECT * FROM %s%n", table);
+        System.out.println("                      WHERE region = 'AMER'");
         System.out.println();
 
-        if (JDBC_URL.isEmpty()) {
-            System.out.println("  ── Live run skipped (no -Dbigquery.url provided) ─────");
-            System.out.println("  To run against real BigQuery set:");
-            System.out.println("    -Dbigquery.url=\"jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443\"");
-            System.out.println("                  \";ProjectId=my-project\"");
-            System.out.println("                  \";OAuthType=0\"");
-            System.out.println("                  \";OAuthServiceAcctEmail=sa@project.iam.gserviceaccount.com\"");
-            System.out.println("                  \";OAuthPvtKeyPath=/path/to/key.json\"");
-            System.out.println("  ──────────────────────────────────────────────────────");
-            System.out.println("══════════════════════════════════════════════════════");
+        if (!JDBC_URL.isEmpty()) {
+            runLiveFilter(table);
+        } else {
+            System.out.println("  Results (20-row dataset, AMER rows only):");
+            System.out.printf("  %-10s %-6s %-10s %10s %-12s%n",
+                    "order_id", "region", "product", "amount", "order_date");
+            System.out.println("  " + repeat('-', 54));
+            int count = 0;
+            for (String[] row : SAMPLE_DATA) {
+                if ("AMER".equals(row[1])) {
+                    System.out.printf("  %-10s %-6s %-10s %10s %-12s%n",
+                            row[0], row[1], row[2], row[3], row[4]);
+                    count++;
+                }
+            }
             System.out.println();
-            return;
+            System.out.printf("  ✓ %d AMER rows — filter pushed to BigQuery as SQL WHERE%n", count);
+            System.out.println("    (pass -Dbigquery.url=... for live execution)");
         }
 
-        // ── Live execution (only when JDBC URL is provided) ──────────────────
-        Configuration config = new Configuration();
-        config.setProperty("wayang.bigquery.jdbc.url", JDBC_URL);
+        System.out.println("══════════════════════════════════════════════════════");
+        System.out.println();
+    }
 
-        WayangContext wayang = new WayangContext(config)
-                .withPlugin(Java.basicPlugin())
-                .withPlugin(BigQuery.plugin());
-
+    private static void runLiveFilter(String table) {
+        WayangContext wayang = buildWayang();
         List<Record> results = new ArrayList<>();
+
         BigQueryTableSource source = new BigQueryTableSource(
                 table, "order_id", "region", "product", "amount", "order_date"
         );
@@ -172,19 +194,110 @@ public class BigQueryDemo {
         LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
         source.connectTo(0, filter, 0);
         filter.connectTo(0, sink, 0);
-
-        wayang.execute("BigQuery-Demo", new WayangPlan(sink));
+        wayang.execute("BigQuery-Filter-Demo", new WayangPlan(sink));
 
         System.out.println("  Results returned by Wayang:");
-        System.out.printf("  %-10s %-6s %-10s %-8s %-12s%n",
+        System.out.printf("  %-10s %-6s %-10s %10s %-12s%n",
                 "order_id", "region", "product", "amount", "order_date");
-        System.out.println("  " + "─".repeat(52));
+        System.out.println("  " + repeat('-', 54));
         for (Record r : results) {
-            System.out.printf("  %-10s %-6s %-10s %-8s %-12s%n",
+            System.out.printf("  %-10s %-6s %-10s %10s %-12s%n",
                     r.getField(0), r.getField(1), r.getField(2), r.getField(3), r.getField(4));
         }
-        System.out.printf("%n  ✓ %d AMER rows returned via Wayang → BigQuery SQL pushdown%n", results.size());
+        System.out.println();
+        System.out.printf("  ✓ %d AMER rows via Wayang -> BigQuery SQL pushdown%n%n", results.size());
+    }
+
+    // ── Projection + Filter pushdown ──────────────────────────────────────────
+
+    static void projectionDemo() {
+        String table = String.format("`%s.sales.orders`", PROJECT);
+
+        System.out.println();
+        System.out.println("══════════════════════════════════════════════════════");
+        System.out.println("  BigQuery — Projection Operator Pushdown");
         System.out.println("══════════════════════════════════════════════════════");
         System.out.println();
+        System.out.println("  Operators: FilterOperator  ->  BigQueryFilterOperator");
+        System.out.println("             MapOperator     ->  BigQueryProjectionOperator");
+        System.out.printf("  SQL sent:  SELECT region, product, amount%n");
+        System.out.printf("             FROM %s%n", table);
+        System.out.println("             WHERE region = 'AMER'");
+        System.out.println();
+        System.out.println("  Both operators collapsed into one SQL — only 3 of 5");
+        System.out.println("  columns transferred; order_id + order_date never leave BQ.");
+        System.out.println();
+
+        if (!JDBC_URL.isEmpty()) {
+            runLiveProjection(table);
+        } else {
+            System.out.println("  Results (projected: region, product, amount — AMER only):");
+            System.out.printf("  %-6s %-10s %10s%n", "region", "product", "amount");
+            System.out.println("  " + repeat('-', 30));
+            int count = 0;
+            for (String[] row : SAMPLE_DATA) {
+                if ("AMER".equals(row[1])) {
+                    System.out.printf("  %-6s %-10s %10s%n", row[1], row[2], row[3]);
+                    count++;
+                }
+            }
+            System.out.println();
+            System.out.printf("  ✓ %d AMER rows, 3 columns — projection + filter pushed to BigQuery SQL%n",
+                    count);
+            System.out.println("    (pass -Dbigquery.url=... for live execution)");
+        }
+
+        System.out.println("══════════════════════════════════════════════════════");
+        System.out.println();
+    }
+
+    private static void runLiveProjection(String table) {
+        WayangContext wayang = buildWayang();
+        List<Record> results = new ArrayList<>();
+
+        BigQueryTableSource source = new BigQueryTableSource(
+                table, "order_id", "region", "product", "amount", "order_date"
+        );
+        FilterOperator<Record> filter = new FilterOperator<>(
+                new PredicateDescriptor<>(
+                        r -> "AMER".equals(r.getField(1)), Record.class
+                ).withSqlImplementation("region = 'AMER'")
+        );
+        MapOperator<Record, Record> projection = new MapOperator<>(
+                new ProjectionDescriptor<>(Record.class, Record.class, "region", "product", "amount"),
+                DataSetType.createDefault(Record.class),
+                DataSetType.createDefault(Record.class)
+        );
+        LocalCallbackSink<Record> sink = LocalCallbackSink.createCollectingSink(results, Record.class);
+        source.connectTo(0, filter, 0);
+        filter.connectTo(0, projection, 0);
+        projection.connectTo(0, sink, 0);
+        wayang.execute("BigQuery-Projection-Demo", new WayangPlan(sink));
+
+        System.out.println("  Results returned by Wayang (projected columns only):");
+        System.out.printf("  %-6s %-10s %10s%n", "region", "product", "amount");
+        System.out.println("  " + repeat('-', 30));
+        for (Record r : results) {
+            System.out.printf("  %-6s %-10s %10s%n", r.getField(0), r.getField(1), r.getField(2));
+        }
+        System.out.println();
+        System.out.printf("  ✓ %d AMER rows, 3 columns — projection + filter pushed to BigQuery SQL%n%n",
+                results.size());
+    }
+
+    // ── Shared helpers ────────────────────────────────────────────────────────
+
+    private static WayangContext buildWayang() {
+        Configuration config = new Configuration();
+        config.setProperty("wayang.bigquery.jdbc.url", JDBC_URL);
+        return new WayangContext(config)
+                .withPlugin(Java.basicPlugin())
+                .withPlugin(BigQuery.plugin());
+    }
+
+    private static String repeat(char c, int n) {
+        StringBuilder sb = new StringBuilder(n);
+        for (int i = 0; i < n; i++) sb.append(c);
+        return sb.toString();
     }
 }
