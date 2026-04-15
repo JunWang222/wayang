@@ -16,22 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.wayang.sqlite3.mapping;
+package org.apache.wayang.sqlite3.operators;
 
-import org.apache.wayang.core.mapping.Mapping;
-
-import java.util.Arrays;
-import java.util.Collection;
+import org.apache.wayang.basic.operators.TableSink;
+import org.apache.wayang.basic.data.Record;
+import org.apache.wayang.jdbc.operators.JdbcTableSinkOperator;
+import org.apache.wayang.sqlite3.platform.Sqlite3Platform;
 
 /**
- * Register for the {@link Mapping}s supported for this platform.
+ * SQLite3 implementation of the {@link JdbcTableSinkOperator}.
  */
-public class Mappings {
+public class Sqlite3TableSinkOperator extends JdbcTableSinkOperator {
 
-    public static final Collection<Mapping> ALL = Arrays.asList(
-            new FilterMapping(),
-            new ProjectionMapping(),
-            new TableSinkMapping()
-    );
+    public Sqlite3TableSinkOperator(String tableName, String[] columnNames) {
+        super(tableName, columnNames);
+    }
 
+    public Sqlite3TableSinkOperator(TableSink<Record> that) {
+        super(that);
+    }
+
+    @Override
+    public Sqlite3Platform getPlatform() {
+        return Sqlite3Platform.getInstance();
+    }
 }

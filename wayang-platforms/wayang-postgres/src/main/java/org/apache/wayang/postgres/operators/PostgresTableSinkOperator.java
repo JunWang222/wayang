@@ -16,22 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.wayang.sqlite3.mapping;
+package org.apache.wayang.postgres.operators;
 
-import org.apache.wayang.core.mapping.Mapping;
-
-import java.util.Arrays;
-import java.util.Collection;
+import org.apache.wayang.basic.operators.TableSink;
+import org.apache.wayang.basic.data.Record;
+import org.apache.wayang.jdbc.operators.JdbcTableSinkOperator;
 
 /**
- * Register for the {@link Mapping}s supported for this platform.
+ * PostgreSQL implementation of the {@link JdbcTableSinkOperator}.
  */
-public class Mappings {
+public class PostgresTableSinkOperator extends JdbcTableSinkOperator implements PostgresExecutionOperator {
 
-    public static final Collection<Mapping> ALL = Arrays.asList(
-            new FilterMapping(),
-            new ProjectionMapping(),
-            new TableSinkMapping()
-    );
+    public PostgresTableSinkOperator(String tableName, String[] columnNames) {
+        super(tableName, columnNames);
+    }
 
+    public PostgresTableSinkOperator(TableSink<Record> that) {
+        super(that);
+    }
 }

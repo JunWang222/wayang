@@ -40,6 +40,7 @@ import org.apache.wayang.jdbc.operators.JdbcExecutionOperator;
 import org.apache.wayang.jdbc.operators.JdbcFilterOperator;
 import org.apache.wayang.jdbc.operators.JdbcJoinOperator;
 import org.apache.wayang.jdbc.operators.JdbcProjectionOperator;
+import org.apache.wayang.jdbc.operators.JdbcTableSinkOperator;
 import org.apache.wayang.jdbc.operators.JdbcTableSource;
 import org.apache.wayang.jdbc.platform.JdbcPlatformTemplate;
 import org.apache.logging.log4j.LogManager;
@@ -52,6 +53,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Set;
@@ -78,14 +80,96 @@ public class JdbcExecutor extends ExecutorTemplate {
 
     @Override
     public void execute(final ExecutionStage stage, final OptimizationContext optimizationContext, final ExecutionState executionState) {
-        final Tuple2<String, SqlQueryChannel.Instance> pair = JdbcExecutor.createSqlQuery(stage, optimizationContext, this);
-        final String query = pair.field0;
-        final SqlQueryChannel.Instance queryChannel = pair.field1;
+        // Check if this stage ends with a sink operator
+        final Collection<?> termTasks = stage.getTerminalTasks();
+        assert termTasks.size() == 1 : "Invalid JDBC stage: multiple terminal tasks are not currently supported.";
+        final ExecutionTask termTask = (ExecutionTask) termTasks.toArray()[0];
 
-        queryChannel.setSqlQuery(query);
+        if (termTask.getOperator() instanceof JdbcTableSinkOperator) {
+            // If it is a sink stage: compose and execute SQL directly within the database
+            JdbcExecutor.executeSinkStage(stage, optimizationContext, this);
+        } else {
+            //If it is normal stage: compose SQL and store in channel for downstream consumption
+            final Tuple2<String, SqlQueryChannel.Instance> pair = JdbcExecutor.createSqlQuery(stage, optimizationContext, this);
+            final String query = pair.field0;
+            final SqlQueryChannel.Instance queryChannel = pair.field1;
+            queryChannel.setSqlQuery(query);
+            executionState.register(queryChannel);
+        }
+    }
 
-        // Return the tipChannelInstance.
-        executionState.register(queryChannel);
+    /**
+     * Handles execution stages that end with a {@link JdbcTableSinkOperator}.
+     * Composes a SQL query from the stage's operators and executes it directly
+     * on the database connection, keeping all data within the database.
+     *
+     * @param stage               the execution stage ending with a sink
+     * @param optimizationContext provides optimization information
+     * @param jdbcExecutor        the executor with the database connection
+     */
+    private static void executeSinkStage(final ExecutionStage stage,
+                                         final OptimizationContext optimizationContext,
+                                         final JdbcExecutor jdbcExecutor) {
+        final Collection<?> startTasks = stage.getStartTasks();
+        final Collection<?> termTasks = stage.getTerminalTasks();
+
+        assert startTasks.size() == 1 : "Invalid JDBC stage: multiple sources are not currently supported";
+        final ExecutionTask startTask = (ExecutionTask) startTasks.toArray()[0];
+        assert termTasks.size() == 1 : "Invalid JDBC stage: multiple terminal tasks are not currently supported.";
+        final ExecutionTask termTask = (ExecutionTask) termTasks.toArray()[0];
+        assert startTask.getOperator() instanceof TableSource
+                : "Invalid JDBC stage: Start task has to be a TableSource";
+        assert termTask.getOperator() instanceof JdbcTableSinkOperator
+                : "Invalid JDBC stage: Terminal task has to be a JdbcTableSinkOperator";
+
+        // Extract operators from the stage
+        final JdbcTableSource tableOp = (JdbcTableSource) startTask.getOperator();
+        final JdbcTableSinkOperator sinkOp = (JdbcTableSinkOperator) termTask.getOperator();
+        final Collection<JdbcFilterOperator> filterTasks = new ArrayList<>(4);
+        JdbcProjectionOperator projectionTask = null;
+        final Collection<JdbcJoinOperator<?>> joinTasks = new ArrayList<>();
+
+        // Walk through intermediate operators, stopping at the sink
+        ExecutionTask nextTask = JdbcExecutor.findJdbcExecutionOperatorTaskInStage(startTask, stage);
+        while (nextTask != null && !(nextTask.getOperator() instanceof JdbcTableSinkOperator)) {
+            if (nextTask.getOperator() instanceof final JdbcFilterOperator filterOperator) {
+                filterTasks.add(filterOperator);
+            } else if (nextTask.getOperator() instanceof JdbcProjectionOperator projectionOperator) {
+                assert projectionTask == null;
+                projectionTask = projectionOperator;
+            } else if (nextTask.getOperator() instanceof JdbcJoinOperator joinOperator) {
+                joinTasks.add(joinOperator);
+            } else {
+                throw new WayangException(String.format("Unsupported JDBC execution task %s", nextTask.toString()));
+            }
+            nextTask = JdbcExecutor.findJdbcExecutionOperatorTaskInStage(nextTask, stage);
+        }
+
+        // Compose the SELECT query
+        final StringBuilder selectQuery = createSqlString(jdbcExecutor, tableOp, filterTasks, projectionTask, joinTasks);
+
+        // Remove trailing semicolon from SELECT
+        String selectSql = selectQuery.toString();
+        if (selectSql.endsWith(";")) {
+            selectSql = selectSql.substring(0, selectSql.length() - 1);
+        }
+
+        // Get the sink's SQL clause
+        final String sinkClause = sinkOp.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler);
+
+        // Execute on the database
+        try (Statement stmt = jdbcExecutor.connection.createStatement()) {
+            // Handle overwrite: drop existing table first
+            if ("overwrite".equals(sinkOp.getMode())) {
+                stmt.execute("DROP TABLE IF EXISTS " + sinkOp.getTableName());
+            }
+            // Execute the composed query: CREATE TABLE x AS SELECT ... or INSERT INTO x SELECT ...
+            final String fullSql = sinkClause + " " + selectSql;
+            stmt.execute(fullSql);
+            jdbcExecutor.logger.info("Executed SQL sink: {}", fullSql);
+        } catch (SQLException e) {
+            throw new WayangException("Failed to execute SQL sink on table: " + sinkOp.getTableName(), e);
+        }
     }
 
     /**
