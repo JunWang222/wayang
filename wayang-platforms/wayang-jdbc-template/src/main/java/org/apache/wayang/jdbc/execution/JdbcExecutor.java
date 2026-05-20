@@ -129,9 +129,9 @@ public class JdbcExecutor extends ExecutorTemplate {
         // Extract operators from the stage
         final JdbcTableSource tableOp = (JdbcTableSource) startTask.getOperator();
         final JdbcTableSinkOperator sinkOp = (JdbcTableSinkOperator) termTask.getOperator();
-        final Collection<JdbcFilterOperator> filterTasks = new ArrayList<>(4);
+        final Collection<JdbcExecutionOperator> filterTasks = new ArrayList<>(4);
         JdbcProjectionOperator projectionTask = null;
-        final Collection<JdbcJoinOperator<?>> joinTasks = new ArrayList<>();
+        final Collection<JdbcExecutionOperator> joinTasks = new ArrayList<>();
 
         // Walk through intermediate operators, stopping at the sink
         ExecutionTask nextTask = JdbcExecutor.findJdbcExecutionOperatorTaskInStage(startTask, stage);
