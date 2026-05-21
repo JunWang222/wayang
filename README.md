@@ -100,13 +100,13 @@ tar -xvf wayang-1.0.1-SNAPSHOT.tar.gz
 cd wayang-1.0.1-SNAPSHOT
 ```
 
-In linux
+In Linux
 ```shell
 echo "export WAYANG_HOME=$(pwd)" >> ~/.bashrc
 echo "export PATH=${PATH}:${WAYANG_HOME}/bin" >> ~/.bashrc
 source ~/.bashrc
 ```
-In MacOS
+In macOS
 ```shell
 echo "export WAYANG_HOME=$(pwd)" >> ~/.zshrc
 echo "export PATH=${PATH}:${WAYANG_HOME}/bin" >> ~/.zshrc
@@ -192,7 +192,7 @@ Spark 3.4.4, Compatible with Scala 2.12.
 Maven
 ```
 
-> **NOTE:** In windows, you need to define the variable `HADOOP_HOME` with the winutils.exe, an not official option to obtain [this repository](https://github.com/steveloughran/winutils), or you can generate your winutils.exe following the instructions in the repository. Also, you may need to install [msvcr100.dll](https://www.microsoft.com/en-us/download/details.aspx?id=26999)
+>**NOTE:** In Windows, you need to define the variable `HADOOP_HOME` with the winutils.exe. An unofficial option to obtain it is from [this repository](https://github.com/steveloughran/winutils), or you can generate your winutils.exe following the instructions in the repository. Also, you may need to install [msvcr100.dll](https://www.microsoft.com/en-us/download/details.aspx?id=26999)
 
 > **NOTE:** Make sure that the JAVA_HOME environment variable is set correctly to Java 17 as the prerequisite checker script currently supports up to Java 17 and checks the latest version of Java if you have higher version installed. In Linux, it is preferably to use the export JAVA_HOME method inside the project folder. It is also recommended running './mvnw clean install' before opening the project using IntelliJ.
 
