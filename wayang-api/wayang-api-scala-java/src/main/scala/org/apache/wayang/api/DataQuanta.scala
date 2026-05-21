@@ -1402,8 +1402,10 @@ class JoinedDataQuanta[Out0: ClassTag, Out1: ClassTag]
 }
 
 /**
- * TODO: add the documentation to the object org.apache.wayang.api.DataQuanta
- * labels: documentation,todo
+ * Companion object for [[DataQuanta]].
+ *
+ * Provides factory methods to create [[DataQuanta]] instances directly
+ * from [[OutputSlot]]s.
  */
 object DataQuanta {
 
