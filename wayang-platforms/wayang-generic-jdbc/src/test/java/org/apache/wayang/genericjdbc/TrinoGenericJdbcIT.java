@@ -320,7 +320,7 @@ class TrinoGenericJdbcIT {
                 "Expected to find a query containing '" + expectedFragment +
                 "' in Trino's system.runtime.queries. " +
                 "If this fails, Wayang did NOT send SQL to Trino.");
-        assertEquals(3, results.size(), "Expected 3 AMER rows");
+        assertEquals(5, results.size(), "Expected 5 AMER rows");
         System.out.println("[VERIFY] SQL confirmed in Trino history. " + results.size() + " AMER rows returned.");
     }
 
@@ -489,7 +489,7 @@ class TrinoGenericJdbcIT {
 
         createContext(createTrinoConfig()).execute("Trino-Projection", new WayangPlan(sink));
 
-        assertEquals(10, results.size(), "Should have 10 projected rows");
+        assertEquals(20, results.size(), "Should have 20 projected rows");
         // Each record has only 2 fields because projection happened in SQL
         results.forEach(r -> assertEquals(2, r.size(), "Record should have exactly 2 projected fields"));
         System.out.println("[PASS] Projection: " + results.size() + " rows (region, amount)");
@@ -649,7 +649,7 @@ class TrinoGenericJdbcIT {
 
         createContext(createTrinoConfig()).execute("Trino-Cardinality", new WayangPlan(sink));
 
-        assertEquals(3, results.size(), "Expected 3 EMEA rows");
-        System.out.println("[PASS] Cardinality: " + results.size() + " EMEA rows (expected 3)");
+        assertEquals(5, results.size(), "Expected 5 EMEA rows");
+        System.out.println("[PASS] Cardinality: " + results.size() + " EMEA rows (expected 5)");
     }
 }

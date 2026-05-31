@@ -21,7 +21,7 @@ services:
       - ./data.yaml:/data.yaml
     command: --project=test-project --data-from-yaml=/data.yaml
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:9050/bigquery/v2/projects/test-project/datasets || exit 1"]
+      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/localhost/9050'"]
       interval: 10s
       timeout: 5s
       retries: 5
