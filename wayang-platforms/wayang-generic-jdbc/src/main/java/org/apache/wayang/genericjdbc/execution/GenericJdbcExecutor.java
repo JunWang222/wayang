@@ -200,7 +200,6 @@ public class GenericJdbcExecutor extends ExecutorTemplate {
                 separator = " AND ";
             }
         }
-        sb.append(';');
         return sb.toString();
     }
 

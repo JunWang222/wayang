@@ -37,6 +37,7 @@
         <java-module-name>org.apache.wayang.platform.genericjdbc</java-module-name>
         <postgres.version>42.7.2</postgres.version>
         <mysql.version>8.0.33</mysql.version>
+        <presto.version>0.297</presto.version>
     </properties>
 
     <dependencies>
@@ -44,6 +45,11 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <version>${postgres.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.facebook.presto</groupId>
+            <artifactId>presto-jdbc</artifactId>
+            <version>${presto.version}</version>
         </dependency>
         <!-- https://mvnrepository.com/artifact/mysql/mysql-connector-java -->
 <!--        <dependency>-->

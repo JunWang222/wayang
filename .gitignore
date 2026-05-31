@@ -17,6 +17,8 @@
 # Misc
 hybrid/*
 pom.xml.*
+hs_err_pid*.log
+replay_pid*.log
 
 10e*.input
 *_pb2.py

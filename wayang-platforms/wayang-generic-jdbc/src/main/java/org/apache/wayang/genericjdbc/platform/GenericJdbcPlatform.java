@@ -54,6 +54,10 @@ public class GenericJdbcPlatform extends JdbcPlatformTemplate {
         super(PLATFORM_NAME, CONFIG_NAME);
     }
 
+    protected GenericJdbcPlatform(String platformName, String configName) {
+        super(platformName, configName);
+    }
+
     @Override
     public Executor.Factory getExecutorFactory() {
         return job -> new GenericJdbcExecutor(this, job);
@@ -65,7 +69,7 @@ public class GenericJdbcPlatform extends JdbcPlatformTemplate {
     }
 
 
-    public DatabaseDescriptor createDatabaseDescriptor(Configuration configuration,String jdbcName) {
+    public DatabaseDescriptor createDatabaseDescriptor(Configuration configuration, String jdbcName) {
         return new DatabaseDescriptor(
                 configuration.getStringProperty(String.format("wayang.%s.jdbc.url", jdbcName)),
                 configuration.getStringProperty(String.format("wayang.%s.jdbc.user", jdbcName), null),
