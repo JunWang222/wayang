@@ -1,127 +1,94 @@
 #!/usr/bin/env bash
-# =============================================================================
-#  Wayang Trino Connector — Live Demo Script
-#
-#  Demonstrates:
-#    Act 1 — Start Trino + Iceberg stack via Docker
-#    Act 2 — Query Iceberg data directly through Trino CLI
-#    Act 3 — Run the same queries via the Wayang API (filter + projection)
-#
-#  Prerequisites:
-#    - Docker running
-#    - Run from: trino-setup/   OR   repo root
-#
-#  Usage:
-#    cd trino-setup && ./demo.sh
-#    cd /path/to/wayang && ./trino-setup/demo.sh
-# =============================================================================
 
 set -euo pipefail
 
-# ── Resolve paths ─────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WAYANG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TRINO_SETUP="$SCRIPT_DIR"
-
 TRINO_CONTAINER="trino"
 MAVEN_FLAGS="-Pskip-prerequisite-check -Drat.skip=true -Dmaven.javadoc.skip=true"
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 banner() {
   echo
-  echo "╔══════════════════════════════════════════════════════╗"
-  printf  "║  %-52s║\n" "$*"
-  echo "╚══════════════════════════════════════════════════════╝"
+  echo "============================================================"
+  printf "  %s\n" "$*"
+  echo "============================================================"
   echo
 }
 
 step() {
   echo
-  echo "  ──────────────────────────────────────────────────────"
-  echo "  $*"
-  echo "  ──────────────────────────────────────────────────────"
+  echo "-- $*"
   echo
 }
 
 pause() {
-  echo
-  read -rp "  ▶  Press ENTER to continue..." _
-  echo
+  if [[ "${WAYANG_DEMO_AUTO:-false}" != "true" ]]; then
+    echo
+    read -rp "Press ENTER to continue..." _ || true
+    echo
+  fi
 }
 
 run_wayang_demo() {
-  mvn exec:java -pl wayang-platforms/wayang-generic-jdbc \
-    -Dexec.mainClass="org.apache.wayang.genericjdbc.TrinoDemo" \
+  "$WAYANG_ROOT/mvnw" exec:java -pl wayang-platforms/wayang-trino \
+    -Dexec.mainClass="org.apache.wayang.trino.TrinoDemo" \
     ${MAVEN_FLAGS}
 }
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  ACT 1 — Start Trino + Iceberg via Docker
-# ═════════════════════════════════════════════════════════════════════════════
-banner "ACT 1 — Start Trino + Iceberg via Docker"
+banner "ACT 1: Start Trino + Iceberg via Docker"
 
-step "1a. Starting the stack (Trino + Hive Metastore + MinIO)"
+step "1a. Starting the stack"
 cd "$TRINO_SETUP"
 docker compose up -d
-echo
 
 step "1b. Containers running"
 docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" \
   | grep -E "NAMES|trino|minio|metastore|postgres"
 
-step "1c. Waiting for Trino to be ready..."
+step "1c. Waiting for Trino to be ready"
 MAX_WAIT=90
 ELAPSED=0
 until docker exec "$TRINO_CONTAINER" \
-        trino --execute "SELECT 1" --output-format ALIGNED > /dev/null 2>&1; do
-  if [ $ELAPSED -ge $MAX_WAIT ]; then
-    echo "  ✗ Timed out waiting for Trino after ${MAX_WAIT}s"
+  trino --execute "SELECT 1" --output-format ALIGNED >/dev/null 2>&1; do
+  if [[ "$ELAPSED" -ge "$MAX_WAIT" ]]; then
+    echo "Timed out waiting for Trino after ${MAX_WAIT}s"
     exit 1
   fi
-  printf "  . waiting (%ds elapsed)\r" "$ELAPSED"
+  printf ". waiting (%ds elapsed)\r" "$ELAPSED"
   sleep 3
   ELAPSED=$((ELAPSED + 3))
 done
-echo "  ✓ Trino is ready at http://localhost:8080"
+echo "Trino is ready at http://localhost:8080"
 
-step "1d. Initialising Iceberg tables (create + seed data)"
+step "1d. Initialising Iceberg tables"
 docker exec -i "$TRINO_CONTAINER" trino < "$TRINO_SETUP/scripts/init.sql" 2>&1 \
   | grep -v "^WARNING\|jline\|org.jline" || true
-echo "  ✓ iceberg.sales.orders seeded with 20 rows (4 regions, 5 products)"
+echo "iceberg.sales.orders seeded"
 
-step "1e. Table schema — iceberg.sales.orders"
-echo "  SQL: DESCRIBE iceberg.sales.orders"
-echo
+step "1e. Table schema"
 docker exec "$TRINO_CONTAINER" \
   trino --execute "DESCRIBE iceberg.sales.orders" \
-        --output-format ALIGNED 2>/dev/null
+  --output-format ALIGNED 2>/dev/null
 
 pause
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  ACT 2 — Query Iceberg directly through the Trino CLI
-# ═════════════════════════════════════════════════════════════════════════════
-banner "ACT 2 — Query Iceberg directly via Trino CLI"
-echo "  (No Wayang yet — plain SQL sent straight to Trino)"
-cd "$TRINO_SETUP"
+banner "ACT 2: Query Iceberg directly via Trino CLI"
 
 step "2a. Full table scan"
-echo "  SQL: SELECT * FROM iceberg.sales.orders"
-echo
+echo "SQL: SELECT * FROM iceberg.sales.orders"
 docker exec "$TRINO_CONTAINER" \
   trino --execute "SELECT * FROM iceberg.sales.orders ORDER BY order_id" \
-        --output-format ALIGNED 2>/dev/null
+  --output-format ALIGNED 2>/dev/null
 
 step "2b. Filter: region = 'AMER'"
-echo "  SQL: SELECT * FROM iceberg.sales.orders WHERE region = 'AMER'"
-echo
+echo "SQL: SELECT * FROM iceberg.sales.orders WHERE region = 'AMER'"
 docker exec "$TRINO_CONTAINER" \
   trino --execute "SELECT * FROM iceberg.sales.orders WHERE region = 'AMER' ORDER BY order_id" \
-        --output-format ALIGNED 2>/dev/null
+  --output-format ALIGNED 2>/dev/null
 
-step "2c. Projection: SELECT region, product, amount WHERE region = 'AMER'"
-echo "  SQL: SELECT region, product, amount FROM iceberg.sales.orders WHERE region = 'AMER'"
-echo
+step "2c. Projection with filter"
+echo "SQL: SELECT region, product, amount FROM iceberg.sales.orders WHERE region = 'AMER'"
 docker exec "$TRINO_CONTAINER" \
   trino --execute \
     "SELECT region, product, amount
@@ -132,24 +99,13 @@ docker exec "$TRINO_CONTAINER" \
 
 pause
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  ACT 3 — Same operators via Wayang API
-# ═════════════════════════════════════════════════════════════════════════════
-banner "ACT 3 — Wayang API: filter + projection pushdown"
-echo "  Wayang rewrites logical operators to Trino-specific physical operators"
-echo "  and generates SQL with WHERE + SELECT column pushdown."
+banner "ACT 3: Wayang API filter + projection pushdown"
 cd "$WAYANG_ROOT"
-
-step "3. Running TrinoDemo filter + projection (Seg 3 + Seg 4)"
-echo "  Running TrinoDemo.main() — filter and projection operators demonstrated."
-echo
 run_wayang_demo
 
-# ─────────────────────────────────────────────────────────────────────────────
 banner "Demo complete"
-echo "  Trino UI:  http://localhost:8080  (query history, plan, metrics)"
-echo "  MinIO UI:  http://localhost:9001  (minioadmin / minioadmin)"
+echo "Trino UI: http://localhost:8080"
+echo "MinIO UI: http://localhost:9001 (minioadmin / minioadmin)"
 echo
-echo "  To stop the stack:"
-echo "    cd trino-setup && docker compose down"
-echo
+echo "To stop the stack:"
+echo "  cd trino-setup && docker compose down"

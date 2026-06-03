@@ -30,6 +30,7 @@ import org.apache.wayang.basic.data.{Record, Tuple2 => RT2}
 import org.apache.wayang.basic.model.{DLModel, Model, LogisticRegressionModel,DecisionTreeRegressionModel}
 import org.apache.wayang.basic.operators.{DLTrainingOperator, GlobalReduceOperator, LocalCallbackSink, MapOperator, SampleOperator, LogisticRegressionOperator,DecisionTreeRegressionOperator, LinearSVCOperator}
 import org.apache.wayang.commons.util.profiledb.model.Experiment
+import org.apache.wayang.core.api.spatial.{SpatialGeometry, SpatialPredicate}
 import org.apache.wayang.core.function.FunctionDescriptor.{SerializableBiFunction, SerializableBinaryOperator, SerializableFunction, SerializableIntUnaryOperator, SerializablePredicate}
 import org.apache.wayang.core.optimizer.ProbabilisticDoubleInterval
 import org.apache.wayang.core.optimizer.cardinality.CardinalityEstimator
@@ -282,6 +283,57 @@ trait DataQuantaBuilder[+This <: DataQuantaBuilder[_, Out], Out] extends Logging
     new JoinDataQuantaBuilder(this, that, thisKeyUdf, thatKeyUdf)
 
   /**
+    * Feed the built [[DataQuanta]] into a spatial filter operator.
+    * Requires the wayang-spatial plugin to be loaded.
+    *
+    * @param keyUdf          function to extract geometry from elements
+    * @param predicate       the spatial predicate type
+    * @param filterGeometry  the geometry to filter against
+    * @return a [[DataQuantaBuilder]] representing the filtered output
+    */
+  def spatialFilter(
+      keyUdf: SerializableFunction[Out, _ <: SpatialGeometry],
+      predicate: SpatialPredicate,
+      filterGeometry: SpatialGeometry
+  ): SpatialFilterDataQuantaBuilder[Out] =
+    new SpatialFilterDataQuantaBuilder(this, keyUdf, predicate, filterGeometry)
+
+  /**
+    * Feed the built [[DataQuanta]] into a spatial filter operator with SQL pushdown support.
+    *
+    * @param keyUdf              function to extract geometry from elements
+    * @param predicate           the spatial predicate type
+    * @param filterGeometry      the geometry to filter against
+    * @param sqlGeometryColumn   the name of the geometry column in the database for SQL pushdown
+    * @return a [[SpatialFilterDataQuantaBuilder]] representing the filtered output
+    */
+  def spatialFilter(
+      keyUdf: SerializableFunction[Out, _ <: SpatialGeometry],
+      predicate: SpatialPredicate,
+      filterGeometry: SpatialGeometry,
+      sqlGeometryColumn: String
+  ): SpatialFilterDataQuantaBuilder[Out] =
+    new SpatialFilterDataQuantaBuilder(this, keyUdf, predicate, filterGeometry)
+      .withSqlGeometryColumnName(sqlGeometryColumn)
+
+  /**
+    * Feed the built [[DataQuanta]] of this and the given instance into a spatial join operator.
+    *
+    * @param thisKeyUdf  function to extract geometry from this instance's elements
+    * @param that        the other [[DataQuantaBuilder]] to join with
+    * @param thatKeyUdf  function to extract geometry from `that` instance's elements
+    * @param predicate   the spatial predicate type
+    * @return a [[SpatialJoinDataQuantaBuilder]] representing the joined output as Tuple2
+    */
+  def spatialJoin[ThatOut](
+      thisKeyUdf: SerializableFunction[Out, _ <: SpatialGeometry],
+      that: DataQuantaBuilder[_, ThatOut],
+      thatKeyUdf: SerializableFunction[ThatOut, _ <: SpatialGeometry],
+      predicate: SpatialPredicate
+  ): SpatialJoinDataQuantaBuilder[Out, ThatOut] =
+    new SpatialJoinDataQuantaBuilder(this, that, thisKeyUdf, thatKeyUdf, predicate)
+
+  /**
    * Feed the built [[DataQuanta]] of this and the given instance into a
    * [[org.apache.wayang.basic.operators.DLTrainingOperator]].
    *
@@ -510,12 +562,12 @@ trait DataQuantaBuilder[+This <: DataQuantaBuilder[_, Out], Out] extends Logging
     * @param catalog          Iceberg Catalog
     * @param schema           Iceberg Schema of the table to create
     * @param tableIdentifier  Iceberg Table Identifier of the table to create
-    * @param outputFileFormat File format of the output data files    
+    * @param outputFileFormat File format of the output data files
     * @return the collected data quanta
     */
 
-  def writeIcebergTable(catalog: Catalog, 
-                      schema: Schema, 
+  def writeIcebergTable(catalog: Catalog,
+                      schema: Schema,
                       tableIdentifier: TableIdentifier,
                       outputFileFormat: FileFormat,
                       jobName: String): Unit = {
@@ -537,6 +589,70 @@ trait DataQuantaBuilder[+This <: DataQuantaBuilder[_, Out], Out] extends Logging
                     udfLoadProfileEstimator: LoadProfileEstimator): Unit = {
     this.javaPlanBuilder.withJobName(jobName)
     this.dataQuanta().writeKafkaTopic(topicName, formatterUdf, udfLoadProfileEstimator)
+  }
+
+  /**
+    * Feed the built [[DataQuanta]] into a [[org.apache.wayang.basic.operators.ParquetSink]]. This triggers
+    * execution of the constructed [[WayangPlan]].
+    *
+    * @param url            URL of the Parquet file to be written
+    * @param overwrite      whether to overwrite existing files
+    * @param preferDataset  whether to prefer Spark Dataset over RDD
+    */
+  def writeParquet(url: String,
+                   overwrite: Boolean,
+                   preferDataset: Boolean): Unit =
+    this.writeParquet(url, overwrite, preferDataset, null)
+
+  /**
+    * Feed the built [[DataQuanta]] into a [[org.apache.wayang.basic.operators.ParquetSink]]. This triggers
+    * execution of the constructed [[WayangPlan]].
+    *
+    * @param url            URL of the Parquet file to be written
+    * @param overwrite      whether to overwrite existing files
+    * @param preferDataset  whether to prefer Spark Dataset over RDD
+    * @param jobName        optional name for the [[WayangPlan]]
+    */
+  def writeParquet(url: String,
+                   overwrite: Boolean,
+                   preferDataset: Boolean,
+                   jobName: String): Unit = {
+    if (jobName != null) this.javaPlanBuilder.withJobName(jobName)
+    this.dataQuanta().asInstanceOf[DataQuanta[Record]].writeParquet(url, overwrite, preferDataset)
+  }
+
+  /**
+    * Feed the built [[DataQuanta]] into a [[org.apache.wayang.basic.operators.TableSink]]. This triggers
+    * execution of the constructed [[WayangPlan]].
+    *
+    * @param tableName   name of the target table
+    * @param mode        write mode (e.g., "overwrite" or "append")
+    * @param columnNames names of the columns in the target table
+    * @param props       database connection properties
+    */
+  def writeTable(tableName: String,
+                 mode: String,
+                 columnNames: Array[String],
+                 props: java.util.Properties): Unit =
+    this.writeTable(tableName, mode, columnNames, props, null)
+
+  /**
+    * Feed the built [[DataQuanta]] into a [[org.apache.wayang.basic.operators.TableSink]]. This triggers
+    * execution of the constructed [[WayangPlan]].
+    *
+    * @param tableName   name of the target table
+    * @param mode        write mode (e.g., "overwrite" or "append")
+    * @param columnNames names of the columns in the target table
+    * @param props       database connection properties
+    * @param jobName     optional name for the [[WayangPlan]]
+    */
+  def writeTable(tableName: String,
+                 mode: String,
+                 columnNames: Array[String],
+                 props: java.util.Properties,
+                 jobName: String): Unit = {
+    if (jobName != null) this.javaPlanBuilder.withJobName(jobName)
+    this.dataQuanta().writeTable(tableName, mode, columnNames, props)
   }
 
   /**
@@ -1928,4 +2044,42 @@ class KeyedDataQuantaBuilder[Out, Key](private val dataQuantaBuilder: DataQuanta
   def coGroup[ThatOut](that: KeyedDataQuantaBuilder[ThatOut, Key]) =
     dataQuantaBuilder.coGroup(this.keyExtractor, that.dataQuantaBuilder, that.keyExtractor)
 
+}
+
+class SpatialFilterDataQuantaBuilder[T](inputDataQuanta: DataQuantaBuilder[_, T],
+                                        keySelector: SerializableFunction[T, _ <: SpatialGeometry],
+                                        predicateType: SpatialPredicate,
+                                        filterGeometry: SpatialGeometry)
+                                       (implicit javaPlanBuilder: JavaPlanBuilder)
+  extends BasicDataQuantaBuilder[SpatialFilterDataQuantaBuilder[T], T] {
+
+  private var columnName: String = _
+
+  def withSqlGeometryColumnName(columnName: String): SpatialFilterDataQuantaBuilder[T] = {
+    this.columnName = columnName
+    this
+  }
+
+  override protected def build: DataQuanta[T] = {
+    val dq = inputDataQuanta.dataQuanta()
+    dq.spatialFilterJava(keySelector, predicateType, filterGeometry, this.columnName)
+  }
+}
+
+class SpatialJoinDataQuantaBuilder[In0, In1](inputDataQuanta0: DataQuantaBuilder[_, In0],
+                                             inputDataQuanta1: DataQuantaBuilder[_, In1],
+                                             keyUdf0: SerializableFunction[In0, _ <: SpatialGeometry],
+                                             keyUdf1: SerializableFunction[In1, _ <: SpatialGeometry],
+                                             predicateType: SpatialPredicate)
+                                            (implicit javaPlanBuilder: JavaPlanBuilder)
+  extends BasicDataQuantaBuilder[SpatialJoinDataQuantaBuilder[In0, In1], RT2[In0, In1]] {
+
+  override protected def build: DataQuanta[RT2[In0, In1]] = {
+    val dq0 = inputDataQuanta0.dataQuanta()
+    val dq1 = inputDataQuanta1.dataQuanta()
+    applyTargetPlatforms(
+      dq0.spatialJoinJava(keyUdf0, dq1, keyUdf1, predicateType)(inputDataQuanta1.classTag),
+      this.getTargetPlatforms()
+    )
+  }
 }

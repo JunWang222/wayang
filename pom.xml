@@ -96,6 +96,7 @@
         <scala.version>2.12.17</scala.version>
         <scala.mayor.version>2.12</scala.mayor.version>
         <spark.version>3.4.4</spark.version>
+        <sedona.version>1.6.1</sedona.version>
         <flink.version>1.20.0</flink.version>
         <calcite.version>1.39.0</calcite.version>
 

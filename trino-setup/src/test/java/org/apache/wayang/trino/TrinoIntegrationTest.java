@@ -120,8 +120,8 @@ class TrinoIntegrationTest {
     @DisplayName("Iceberg table: select all orders")
     void testIcebergSelectAll() throws SQLException {
         List<List<Object>> rows = query("SELECT * FROM iceberg.sales.orders ORDER BY order_id");
-        assertEquals(10, rows.size(), "Expected 10 rows inserted by init.sql");
-        System.out.println("[PASS] Iceberg full scan: 10 rows");
+        assertEquals(20, rows.size(), "Expected 20 rows inserted by init.sql");
+        System.out.println("[PASS] Iceberg full scan: 20 rows");
         rows.forEach(r -> System.out.printf("       %s%n", r));
     }
 
