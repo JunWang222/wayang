@@ -67,6 +67,8 @@ public abstract class JdbcTableSource extends TableSource implements JdbcExecuti
     @Override
     public CardinalityEstimator getCardinalityEstimator(int outputIndex) {
         assert outputIndex == 0;
+        System.out.println("[DEBUG JdbcTableSource] getCardinalityEstimator called for table="
+                + this.getTableName() + ", platform=" + this.getPlatform().getName());
         return new CardinalityEstimator() {
             @Override
             public CardinalityEstimate estimate(OptimizationContext optimizationContext, CardinalityEstimate... inputEstimates) {
@@ -83,6 +85,8 @@ public abstract class JdbcTableSource extends TableSource implements JdbcExecuti
                     // Query the table cardinality.
                     // No trailing ';' — strict parsers (Trino, BigQuery) reject it in executeQuery.
                     final String sql = String.format("SELECT count(*) FROM %s", JdbcTableSource.this.getTableName());
+                    System.out.println("[DEBUG JdbcTableSource] estimate called; executing SQL: " + sql
+                            + " on platform=" + JdbcTableSource.this.getPlatform().getName());
                     final ResultSet resultSet = connection.createStatement().executeQuery(sql);
                     if (!resultSet.next()) {
                         throw new SQLException("No query result for \"" + sql + "\".");
