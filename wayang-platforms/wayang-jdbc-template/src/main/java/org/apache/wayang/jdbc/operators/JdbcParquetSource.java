@@ -18,94 +18,85 @@
 
 package org.apache.wayang.jdbc.operators;
 
-import org.apache.wayang.basic.operators.TableSource;
+import org.apache.logging.log4j.LogManager;
+import org.apache.wayang.basic.operators.ParquetSource;
 import org.apache.wayang.commons.util.profiledb.model.measurement.TimeMeasurement;
+import org.apache.wayang.core.api.Configuration;
 import org.apache.wayang.core.optimizer.OptimizationContext;
 import org.apache.wayang.core.optimizer.cardinality.CardinalityEstimate;
-import org.apache.wayang.core.optimizer.cardinality.CardinalityEstimator;
 import org.apache.wayang.jdbc.compiler.FunctionCompiler;
-import org.apache.logging.log4j.LogManager;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Optional;
 
 /**
- * PostgreSQL implementation for the {@link TableSource}.
+ * JDBC implementation for {@link ParquetSource}s exposed by an engine as a SQL
+ * relation, such as a Hive/Iceberg table or BigQuery external table.
  */
-public abstract class JdbcTableSource extends TableSource implements JdbcSourceOperator {
+public abstract class JdbcParquetSource extends ParquetSource implements JdbcSourceOperator {
 
-    /**
-     * Creates a new instance.
-     *
-     * @see TableSource#TableSource(String, String...)
-     */
-    public JdbcTableSource(String tableName, String... columnNames) {
-        super(tableName, columnNames);
+    public JdbcParquetSource(String sourceName, String[] projection, String... columnNames) {
+        super(sourceName, projection, columnNames);
     }
 
-    /**
-     * Copies an instance (exclusive of broadcasts).
-     *
-     * @param that that should be copied
-     */
-    public JdbcTableSource(JdbcTableSource that) {
+    public JdbcParquetSource(ParquetSource that) {
         super(that);
     }
 
     @Override
-    public String createSqlClause(Connection connection, FunctionCompiler compiler) {
-        return this.getTableName();
+    public String getSourceName() {
+        return this.getInputUrl();
     }
 
     @Override
-    public String getSourceName() {
-        return this.getTableName();
+    public String createSqlClause(Connection connection, FunctionCompiler compiler) {
+        return this.getSourceName();
     }
-
 
     @Override
     public String getLoadProfileEstimatorConfigurationKey() {
-        return String.format("wayang.%s.tablesource.load", this.getPlatform().getPlatformId());
+        return String.format("wayang.%s.parquetsource.load", this.getPlatform().getPlatformId());
     }
 
     @Override
-    public CardinalityEstimator getCardinalityEstimator(int outputIndex) {
+    public org.apache.wayang.core.optimizer.cardinality.CardinalityEstimator getCardinalityEstimator(int outputIndex) {
         assert outputIndex == 0;
-        return new CardinalityEstimator() {
+        return new org.apache.wayang.core.optimizer.cardinality.CardinalityEstimator() {
             @Override
-            public CardinalityEstimate estimate(OptimizationContext optimizationContext, CardinalityEstimate... inputEstimates) {
-                // see Job for StopWatch measurements
+            public CardinalityEstimate estimate(OptimizationContext optimizationContext,
+                                                CardinalityEstimate... inputEstimates) {
                 final TimeMeasurement timeMeasurement = optimizationContext.getJob().getStopWatch().start(
                         "Optimization", "Cardinality&Load Estimation", "Push Estimation", "Estimate source cardinalities"
                 );
 
-                // Establish a DB connection.
-                try (Connection connection = JdbcTableSource.this.getPlatform()
+                try (Connection connection = JdbcParquetSource.this.getPlatform()
                         .createDatabaseDescriptor(optimizationContext.getConfiguration())
                         .createJdbcConnection()) {
-
-                    // Query the table cardinality.
-                    // No trailing ';' — strict parsers (Trino, BigQuery) reject it in executeQuery.
-                    final String sql = String.format("SELECT count(*) FROM %s", JdbcTableSource.this.getTableName());
+                    final String sql = String.format("SELECT count(*) FROM %s", JdbcParquetSource.this.getSourceName());
                     final ResultSet resultSet = connection.createStatement().executeQuery(sql);
                     if (!resultSet.next()) {
                         throw new SQLException("No query result for \"" + sql + "\".");
                     }
                     long cardinality = resultSet.getLong(1);
                     return new CardinalityEstimate(cardinality, cardinality, 1d);
-
                 } catch (Exception e) {
                     LogManager.getLogger(this.getClass()).error(
-                            "Could not estimate cardinality for {}.", JdbcTableSource.this, e
+                            "Could not estimate cardinality for {}.", JdbcParquetSource.this, e
                     );
-
-                    // If we could not load the cardinality, let's use a very conservative estimate.
                     return new CardinalityEstimate(10, 10000000, 0.9);
                 } finally {
                     timeMeasurement.stop();
                 }
             }
         };
+    }
+
+    @Override
+    public Optional<org.apache.wayang.core.optimizer.cardinality.CardinalityEstimator> createCardinalityEstimator(
+            int outputIndex,
+            Configuration configuration) {
+        return Optional.of(this.getCardinalityEstimator(outputIndex));
     }
 }

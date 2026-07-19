@@ -16,27 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.wayang.bigquery.mapping;
+package org.apache.wayang.jdbc.operators;
 
-import org.apache.wayang.core.mapping.Mapping;
+import org.apache.wayang.core.platform.ChannelDescriptor;
 
-import java.util.Arrays;
-import java.util.Collection;
+import java.util.List;
 
 /**
- * Register for the {@link Mapping}s supported for this platform.
+ * Marks JDBC operators that can start a SQL stage and provide a relation for a
+ * {@code FROM} clause.
  */
-public class Mappings {
+public interface JdbcSourceOperator extends JdbcExecutionOperator {
 
-    public static final Collection<Mapping> ALL = Arrays.asList(
-            new FilterMapping(),
-            new GlobalReduceMapping(),
-            new JoinMapping(),
-            new ParquetSourceMapping(),
-            new ProjectionMapping(),
-            new ReduceByMapping(),
-            new SortMapping(),
-            new TableSinkMapping()
-    );
+    /**
+     * Name or expression used to identify this source in SQL metadata, e.g., in
+     * join descriptors.
+     */
+    String getSourceName();
 
+    @Override
+    default List<ChannelDescriptor> getSupportedInputChannels(int index) {
+        throw new UnsupportedOperationException("JDBC source operators have no input channels.");
+    }
 }
