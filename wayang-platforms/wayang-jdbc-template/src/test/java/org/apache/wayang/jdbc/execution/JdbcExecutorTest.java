@@ -29,6 +29,7 @@ import org.apache.wayang.core.platform.CrossPlatformExecutor;
 import org.apache.wayang.core.profiling.NoInstrumentationStrategy;
 import org.apache.wayang.jdbc.channels.SqlQueryChannel;
 import org.apache.wayang.jdbc.operators.JdbcFilterOperator;
+import org.apache.wayang.jdbc.operators.JdbcParquetSource;
 import org.apache.wayang.jdbc.operators.JdbcProjectionOperator;
 import org.apache.wayang.jdbc.operators.JdbcTableSource;
 import org.apache.wayang.jdbc.operators.SqlToStreamOperator;
@@ -49,6 +50,35 @@ import static org.mockito.Mockito.when;
  * Test suite for {@link JdbcExecutor}.
  */
 class JdbcExecutorTest {
+
+    @Test
+    void testCreateSqlStringResolvesConfiguredParquetSourceMapping() throws SQLException {
+        Configuration configuration = new Configuration();
+        configuration.setProperty(
+                "wayang.hsqldb.parquetsource.mappings",
+                "file:///warehouse/orders=orders_external"
+        );
+        Job job = mock(Job.class);
+        when(job.getConfiguration()).thenReturn(configuration);
+        when(job.getCrossPlatformExecutor()).thenReturn(new CrossPlatformExecutor(job, new NoInstrumentationStrategy()));
+
+        HsqldbParquetSource source = new HsqldbParquetSource("file:///warehouse/orders", null, "id", "name");
+        JdbcExecutor executor = new JdbcExecutor(HsqldbPlatform.getInstance(), job);
+
+        StringBuilder query = JdbcExecutor.createSqlString(
+                executor,
+                source,
+                Collections.emptyList(),
+                null,
+                null,
+                null,
+                null,
+                Collections.emptyList(),
+                configuration
+        );
+
+        assertEquals("SELECT * FROM orders_external", query.toString());
+    }
 
     @Test
     void testExecuteWithPlainTableSource() throws SQLException {
@@ -243,5 +273,17 @@ class JdbcExecutorTest {
                 "SELECT name, age FROM customer WHERE age >= 18 AND name IS NOT NULL",
                 sqlQueryChannelInstance.getSqlQuery()
         );
+    }
+
+    private static class HsqldbParquetSource extends JdbcParquetSource {
+
+        HsqldbParquetSource(String inputUrl, String[] projection, String... columnNames) {
+            super(inputUrl, projection, columnNames);
+        }
+
+        @Override
+        public HsqldbPlatform getPlatform() {
+            return HsqldbPlatform.getInstance();
+        }
     }
 }

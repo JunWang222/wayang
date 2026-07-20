@@ -51,8 +51,18 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
     }
 
     @Override
+    public String getSourceName(Configuration configuration) {
+        return this.resolveSourceName(configuration);
+    }
+
+    @Override
     public String createSqlClause(Connection connection, FunctionCompiler compiler) {
         return this.getSourceName();
+    }
+
+    @Override
+    public String createSqlClause(Connection connection, FunctionCompiler compiler, Configuration configuration) {
+        return this.getSourceName(configuration);
     }
 
     @Override
@@ -74,7 +84,8 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
                 try (Connection connection = JdbcParquetSource.this.getPlatform()
                         .createDatabaseDescriptor(optimizationContext.getConfiguration())
                         .createJdbcConnection()) {
-                    final String sql = String.format("SELECT count(*) FROM %s", JdbcParquetSource.this.getSourceName());
+                    final String sql = String.format("SELECT count(*) FROM %s",
+                            JdbcParquetSource.this.getSourceName(optimizationContext.getConfiguration()));
                     final ResultSet resultSet = connection.createStatement().executeQuery(sql);
                     if (!resultSet.next()) {
                         throw new SQLException("No query result for \"" + sql + "\".");
@@ -98,5 +109,42 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
             int outputIndex,
             Configuration configuration) {
         return Optional.of(this.getCardinalityEstimator(outputIndex));
+    }
+
+    private String resolveSourceName(Configuration configuration) {
+        if (configuration == null) {
+            return this.getSourceName();
+        }
+
+        final String platformId = this.getPlatform().getPlatformId();
+        final String mappingKey = String.format("wayang.%s.parquetsource.mappings", platformId);
+        final Optional<String> mapping = configuration.getOptionalStringProperty(mappingKey);
+        if (mapping.isEmpty()) {
+            return this.getSourceName();
+        }
+
+        final String inputUrl = this.getInputUrl();
+        for (String entry : mapping.get().split(";")) {
+            final String trimmedEntry = entry.trim();
+            if (trimmedEntry.isEmpty()) {
+                continue;
+            }
+
+            final int separator = trimmedEntry.indexOf('=');
+            if (separator < 0) {
+                LogManager.getLogger(this.getClass()).warn(
+                        "Ignoring invalid Parquet source mapping entry '{}' for {}.", trimmedEntry, mappingKey
+                );
+                continue;
+            }
+
+            final String sourceUri = trimmedEntry.substring(0, separator).trim();
+            final String relationName = trimmedEntry.substring(separator + 1).trim();
+            if (sourceUri.equals(inputUrl) && !relationName.isEmpty()) {
+                return relationName;
+            }
+        }
+
+        return this.getSourceName();
     }
 }

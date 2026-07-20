@@ -18,8 +18,11 @@
 
 package org.apache.wayang.jdbc.operators;
 
+import org.apache.wayang.core.api.Configuration;
 import org.apache.wayang.core.platform.ChannelDescriptor;
+import org.apache.wayang.jdbc.compiler.FunctionCompiler;
 
+import java.sql.Connection;
 import java.util.List;
 
 /**
@@ -33,6 +36,20 @@ public interface JdbcSourceOperator extends JdbcExecutionOperator {
      * join descriptors.
      */
     String getSourceName();
+
+    /**
+     * Name or expression used for this source under the given configuration.
+     */
+    default String getSourceName(Configuration configuration) {
+        return this.getSourceName();
+    }
+
+    /**
+     * Creates a SQL clause for this source under the given configuration.
+     */
+    default String createSqlClause(Connection connection, FunctionCompiler compiler, Configuration configuration) {
+        return this.createSqlClause(connection, compiler);
+    }
 
     @Override
     default List<ChannelDescriptor> getSupportedInputChannels(int index) {
