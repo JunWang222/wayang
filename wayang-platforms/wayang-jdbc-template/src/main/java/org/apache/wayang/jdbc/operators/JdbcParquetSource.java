@@ -22,13 +22,21 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.wayang.basic.operators.ParquetSource;
 import org.apache.wayang.commons.util.profiledb.model.measurement.TimeMeasurement;
 import org.apache.wayang.core.api.Configuration;
+import org.apache.wayang.core.api.exception.WayangException;
 import org.apache.wayang.core.optimizer.OptimizationContext;
 import org.apache.wayang.core.optimizer.cardinality.CardinalityEstimate;
 import org.apache.wayang.jdbc.compiler.FunctionCompiler;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.PrimitiveType;
+import org.apache.parquet.schema.Type;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Optional;
 
 /**
@@ -62,7 +70,7 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
 
     @Override
     public String createSqlClause(Connection connection, FunctionCompiler compiler, Configuration configuration) {
-        return this.getSourceName(configuration);
+        return this.resolveSourceName(connection, configuration);
     }
 
     @Override
@@ -85,7 +93,10 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
                         .createDatabaseDescriptor(optimizationContext.getConfiguration())
                         .createJdbcConnection()) {
                     final String sql = String.format("SELECT count(*) FROM %s",
-                            JdbcParquetSource.this.getSourceName(optimizationContext.getConfiguration()));
+                            JdbcParquetSource.this.resolveSourceName(
+                                    connection,
+                                    optimizationContext.getConfiguration()
+                            ));
                     final ResultSet resultSet = connection.createStatement().executeQuery(sql);
                     if (!resultSet.next()) {
                         throw new SQLException("No query result for \"" + sql + "\".");
@@ -117,10 +128,31 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
         }
 
         final String platformId = this.getPlatform().getPlatformId();
+        return this.findMappedRelation(configuration, platformId)
+                .orElseGet(() -> this.isAutoCreateEnabled(configuration, platformId)
+                        ? this.createGeneratedRelationName(configuration, platformId)
+                        : this.getSourceName());
+    }
+
+    private String resolveSourceName(Connection connection, Configuration configuration) {
+        final String sourceName = this.resolveSourceName(configuration);
+        if (configuration == null) {
+            return sourceName;
+        }
+
+        final String platformId = this.getPlatform().getPlatformId();
+        if (this.isAutoCreateEnabled(configuration, platformId)) {
+            this.createExternalRelation(connection, configuration, platformId, sourceName);
+        }
+
+        return sourceName;
+    }
+
+    private Optional<String> findMappedRelation(Configuration configuration, String platformId) {
         final String mappingKey = String.format("wayang.%s.parquetsource.mappings", platformId);
         final Optional<String> mapping = configuration.getOptionalStringProperty(mappingKey);
         if (mapping.isEmpty()) {
-            return this.getSourceName();
+            return Optional.empty();
         }
 
         final String inputUrl = this.getInputUrl();
@@ -141,10 +173,140 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
             final String sourceUri = trimmedEntry.substring(0, separator).trim();
             final String relationName = trimmedEntry.substring(separator + 1).trim();
             if (sourceUri.equals(inputUrl) && !relationName.isEmpty()) {
-                return relationName;
+                return Optional.of(relationName);
             }
         }
 
-        return this.getSourceName();
+        return Optional.empty();
+    }
+
+    private boolean isAutoCreateEnabled(Configuration configuration, String platformId) {
+        return configuration.getBooleanProperty(
+                String.format("wayang.%s.parquetsource.auto-create", platformId),
+                false
+        );
+    }
+
+    private String createGeneratedRelationName(Configuration configuration, String platformId) {
+        final String prefix = configuration.getStringProperty(
+                String.format("wayang.%s.parquetsource.auto-create.relation-prefix", platformId),
+                "wayang_parquet_"
+        );
+        return prefix + this.shortHash(this.getInputUrl());
+    }
+
+    private String shortHash(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) {
+                sb.append(String.format("%02x", hash[i]));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new WayangException("Could not create stable Parquet relation name.", e);
+        }
+    }
+
+    private void createExternalRelation(Connection connection,
+                                        Configuration configuration,
+                                        String platformId,
+                                        String relationName) {
+        final String templateKey = String.format("wayang.%s.parquetsource.auto-create.template", platformId);
+        final Optional<String> optionalTemplate = configuration.getOptionalStringProperty(templateKey);
+        if (optionalTemplate.isEmpty()) {
+            throw new WayangException(String.format(
+                    "Parquet auto-create is enabled for platform '%s', but '%s' is not configured.",
+                    platformId,
+                    templateKey
+            ));
+        }
+
+        final String template = optionalTemplate.get();
+        final String ddl = template
+                .replace("${relation}", relationName)
+                .replace("${uri}", this.escapeSqlString(this.getInputUrl()))
+                .replace("${columns}", this.createColumnDefinitions(templateKey, template));
+
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(ddl);
+        } catch (SQLException e) {
+            throw new WayangException(String.format(
+                    "Could not create Parquet SQL relation '%s' for '%s'.",
+                    relationName,
+                    this.getInputUrl()
+            ), e);
+        }
+    }
+
+    private String escapeSqlString(String value) {
+        return value.replace("'", "''");
+    }
+
+    private String createColumnDefinitions(String templateKey, String template) {
+        if (!template.contains("${columns}")) {
+            return "";
+        }
+
+        if (this.getSchema() == null || this.getSchema().getFields().isEmpty()) {
+            throw new WayangException(String.format(
+                    "Parquet source auto-create template '%s' uses ${columns}, but no Parquet schema is available. "
+                            + "Create the source with ParquetSource.create(...) or configure a template that does not "
+                            + "need explicit columns.",
+                    templateKey
+            ));
+        }
+
+        return this.getSchema().getFields().stream()
+                .map(field -> field.getName() + " " + this.toSqlType(field))
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("");
+    }
+
+    private String toSqlType(Type field) {
+        if (!field.isPrimitive()) {
+            return "VARCHAR";
+        }
+
+        final PrimitiveType primitiveType = field.asPrimitiveType();
+        final LogicalTypeAnnotation logicalType = primitiveType.getLogicalTypeAnnotation();
+        if (logicalType instanceof LogicalTypeAnnotation.StringLogicalTypeAnnotation
+                || logicalType instanceof LogicalTypeAnnotation.EnumLogicalTypeAnnotation
+                || logicalType instanceof LogicalTypeAnnotation.UUIDLogicalTypeAnnotation) {
+            return "VARCHAR";
+        }
+        if (logicalType instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
+            LogicalTypeAnnotation.DecimalLogicalTypeAnnotation decimal =
+                    (LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) logicalType;
+            return String.format("DECIMAL(%d,%d)", decimal.getPrecision(), decimal.getScale());
+        }
+        if (logicalType instanceof LogicalTypeAnnotation.DateLogicalTypeAnnotation) {
+            return "DATE";
+        }
+        if (logicalType instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
+            return "TIMESTAMP";
+        }
+
+        switch (primitiveType.getPrimitiveTypeName()) {
+            case BOOLEAN:
+                return "BOOLEAN";
+            case INT32:
+                return "INTEGER";
+            case INT64:
+                return "BIGINT";
+            case FLOAT:
+                return "REAL";
+            case DOUBLE:
+                return "DOUBLE";
+            case BINARY:
+                return "VARCHAR";
+            case FIXED_LEN_BYTE_ARRAY:
+                return "VARBINARY";
+            case INT96:
+                return "TIMESTAMP";
+            default:
+                return "VARCHAR";
+        }
     }
 }

@@ -39,10 +39,14 @@ import org.apache.wayang.jdbc.test.HsqldbProjectionOperator;
 import org.apache.wayang.jdbc.test.HsqldbTableSource;
 import org.junit.jupiter.api.Test;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -78,6 +82,91 @@ class JdbcExecutorTest {
         );
 
         assertEquals("SELECT * FROM orders_external", query.toString());
+    }
+
+    @Test
+    void testCreateSqlStringAutoCreatesConfiguredParquetSourceRelation() throws SQLException {
+        Configuration configuration = new Configuration();
+        configuration.setProperty(
+                "wayang.hsqldb.parquetsource.mappings",
+                "file:///warehouse/auto-orders=auto_orders_external"
+        );
+        configuration.setProperty("wayang.hsqldb.parquetsource.auto-create", "true");
+        configuration.setProperty(
+                "wayang.hsqldb.parquetsource.auto-create.template",
+                "CREATE TABLE IF NOT EXISTS ${relation} (id INTEGER)"
+        );
+        Job job = mock(Job.class);
+        when(job.getConfiguration()).thenReturn(configuration);
+        when(job.getCrossPlatformExecutor()).thenReturn(new CrossPlatformExecutor(job, new NoInstrumentationStrategy()));
+
+        HsqldbParquetSource source = new HsqldbParquetSource("file:///warehouse/auto-orders", null, "id");
+        JdbcExecutor executor = new JdbcExecutor(HsqldbPlatform.getInstance(), job);
+
+        StringBuilder query = JdbcExecutor.createSqlString(
+                executor,
+                source,
+                Collections.emptyList(),
+                null,
+                null,
+                null,
+                null,
+                Collections.emptyList(),
+                configuration
+        );
+
+        assertEquals("SELECT * FROM auto_orders_external", query.toString());
+        try (Connection connection = HsqldbPlatform.getInstance()
+                .createDatabaseDescriptor(configuration)
+                .createJdbcConnection();
+                Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery("SELECT count(*) FROM auto_orders_external")) {
+            resultSet.next();
+            assertEquals(0, resultSet.getLong(1));
+        }
+    }
+
+    @Test
+    void testCreateSqlStringAutoCreatesGeneratedParquetSourceRelation() throws SQLException {
+        Configuration configuration = new Configuration();
+        configuration.setProperty("wayang.hsqldb.parquetsource.auto-create", "true");
+        configuration.setProperty(
+                "wayang.hsqldb.parquetsource.auto-create.relation-prefix",
+                "auto_parquet_"
+        );
+        configuration.setProperty(
+                "wayang.hsqldb.parquetsource.auto-create.template",
+                "CREATE TABLE IF NOT EXISTS ${relation} (id INTEGER)"
+        );
+        Job job = mock(Job.class);
+        when(job.getConfiguration()).thenReturn(configuration);
+        when(job.getCrossPlatformExecutor()).thenReturn(new CrossPlatformExecutor(job, new NoInstrumentationStrategy()));
+
+        HsqldbParquetSource source = new HsqldbParquetSource("file:///warehouse/generated-orders", null, "id");
+        JdbcExecutor executor = new JdbcExecutor(HsqldbPlatform.getInstance(), job);
+
+        String query = JdbcExecutor.createSqlString(
+                executor,
+                source,
+                Collections.emptyList(),
+                null,
+                null,
+                null,
+                null,
+                Collections.emptyList(),
+                configuration
+        ).toString();
+
+        assertTrue(query.startsWith("SELECT * FROM auto_parquet_"));
+        String relationName = query.substring("SELECT * FROM ".length());
+        try (Connection connection = HsqldbPlatform.getInstance()
+                .createDatabaseDescriptor(configuration)
+                .createJdbcConnection();
+                Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery("SELECT count(*) FROM " + relationName)) {
+            resultSet.next();
+            assertEquals(0, resultSet.getLong(1));
+        }
     }
 
     @Test
