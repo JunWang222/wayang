@@ -90,27 +90,30 @@ public class JdbcExecutor extends ExecutorTemplate {
                 configuration
         );
         final Collection<String> conditions = filterTasks.stream()
-                .map(op -> op.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler))
+                .map(op -> op.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler, configuration))
                 .collect(Collectors.toList());
         final Collection<String> joins = joinTasks.stream()
-                .map(op -> op.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler))
+                .map(op -> op.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler, configuration))
                 .collect(Collectors.toList());
 
         final String selectClause;
         if (globalReduceTask != null) {
             selectClause = globalReduceTask.createSqlClause(
                     jdbcExecutor.connection,
-                    jdbcExecutor.functionCompiler
+                    jdbcExecutor.functionCompiler,
+                    configuration
             );
         } else if (reduceByTask != null) {
             selectClause = reduceByTask.createSqlClause(
                     jdbcExecutor.connection,
-                    jdbcExecutor.functionCompiler
+                    jdbcExecutor.functionCompiler,
+                    configuration
             );
         } else if (projectionTask != null) {
             selectClause = projectionTask.createSqlClause(
                     jdbcExecutor.connection,
-                    jdbcExecutor.functionCompiler
+                    jdbcExecutor.functionCompiler,
+                    configuration
             );
         } else {
             selectClause = "*";
@@ -131,7 +134,8 @@ public class JdbcExecutor extends ExecutorTemplate {
         if (sortTask != null) {
             sb.append(sortTask.createSqlClause(
                     jdbcExecutor.connection,
-                    jdbcExecutor.functionCompiler
+                    jdbcExecutor.functionCompiler,
+                    configuration
             ));
         }
 
@@ -148,6 +152,7 @@ public class JdbcExecutor extends ExecutorTemplate {
                                                                              final OptimizationContext context,
                                                                              final JdbcExecutor jdbcExecutor) {
         final Collection<?> startTasks = stage.getStartTasks();
+        JdbcExecutor.prepareSourceTasks(startTasks, jdbcExecutor, context.getConfiguration());
         final ExecutionTask startTask = JdbcExecutor.selectStartTask(startTasks, stage, context.getConfiguration());
         assert startTask.getOperator() instanceof JdbcSourceOperator
                 : "Invalid JDBC stage: Start task has to be a JDBC source";
@@ -228,6 +233,21 @@ public class JdbcExecutor extends ExecutorTemplate {
         throw new WayangException("Could not determine the left source for JDBC stage.");
     }
 
+    private static void prepareSourceTasks(final Collection<?> startTasks,
+                                           final JdbcExecutor jdbcExecutor,
+                                           final Configuration configuration) {
+        for (Object startTaskObject : startTasks) {
+            final ExecutionTask startTask = (ExecutionTask) startTaskObject;
+            if (startTask.getOperator() instanceof JdbcSourceOperator) {
+                ((JdbcSourceOperator) startTask.getOperator()).prepareSource(
+                        jdbcExecutor.connection,
+                        jdbcExecutor.functionCompiler,
+                        configuration
+                );
+            }
+        }
+    }
+
     /**
      * Handles execution stages that end with a {@link JdbcTableSinkOperator}.
      */
@@ -235,6 +255,7 @@ public class JdbcExecutor extends ExecutorTemplate {
                                          final JdbcExecutor jdbcExecutor) {
         final Collection<?> startTasks = stage.getStartTasks();
         final Collection<?> termTasks = stage.getTerminalTasks();
+        JdbcExecutor.prepareSourceTasks(startTasks, jdbcExecutor, optimizationContext.getConfiguration());
 
         final ExecutionTask startTask = JdbcExecutor.selectStartTask(
                 startTasks,

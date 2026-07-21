@@ -74,6 +74,11 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
     }
 
     @Override
+    public void prepareSource(Connection connection, FunctionCompiler compiler, Configuration configuration) {
+        this.resolveSourceName(connection, configuration);
+    }
+
+    @Override
     public String getLoadProfileEstimatorConfigurationKey() {
         return String.format("wayang.%s.parquetsource.load", this.getPlatform().getPlatformId());
     }
@@ -128,10 +133,7 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
         }
 
         final String platformId = this.getPlatform().getPlatformId();
-        return this.findMappedRelation(configuration, platformId)
-                .orElseGet(() -> this.isAutoCreateEnabled(configuration, platformId)
-                        ? this.createGeneratedRelationName(configuration, platformId)
-                        : this.getSourceName());
+        return resolveSourceName(configuration, platformId, this.getInputUrl());
     }
 
     private String resolveSourceName(Connection connection, Configuration configuration) {
@@ -141,21 +143,39 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
         }
 
         final String platformId = this.getPlatform().getPlatformId();
-        if (this.isAutoCreateEnabled(configuration, platformId)) {
+        if (isAutoCreateEnabled(configuration, platformId)) {
             this.createExternalRelation(connection, configuration, platformId, sourceName);
         }
 
         return sourceName;
     }
 
-    private Optional<String> findMappedRelation(Configuration configuration, String platformId) {
+    public static String resolveSourceName(Configuration configuration, String platformId, String inputUrl) {
+        if (configuration == null) {
+            return inputUrl;
+        }
+
+        return findMappedRelation(configuration, platformId, inputUrl)
+                .orElseGet(() -> isAutoCreateEnabled(configuration, platformId) && isParquetLocation(inputUrl)
+                        ? createGeneratedRelationName(configuration, platformId, inputUrl)
+                        : inputUrl);
+    }
+
+    private static boolean isParquetLocation(String inputUrl) {
+        return inputUrl.contains("://")
+                || inputUrl.startsWith("/")
+                || inputUrl.startsWith("\\")
+                || inputUrl.matches("^[A-Za-z]:[\\\\/].*")
+                || inputUrl.contains(".parquet");
+    }
+
+    private static Optional<String> findMappedRelation(Configuration configuration, String platformId, String inputUrl) {
         final String mappingKey = String.format("wayang.%s.parquetsource.mappings", platformId);
         final Optional<String> mapping = configuration.getOptionalStringProperty(mappingKey);
         if (mapping.isEmpty()) {
             return Optional.empty();
         }
 
-        final String inputUrl = this.getInputUrl();
         for (String entry : mapping.get().split(";")) {
             final String trimmedEntry = entry.trim();
             if (trimmedEntry.isEmpty()) {
@@ -164,7 +184,7 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
 
             final int separator = trimmedEntry.indexOf('=');
             if (separator < 0) {
-                LogManager.getLogger(this.getClass()).warn(
+                LogManager.getLogger(JdbcParquetSource.class).warn(
                         "Ignoring invalid Parquet source mapping entry '{}' for {}.", trimmedEntry, mappingKey
                 );
                 continue;
@@ -180,22 +200,22 @@ public abstract class JdbcParquetSource extends ParquetSource implements JdbcSou
         return Optional.empty();
     }
 
-    private boolean isAutoCreateEnabled(Configuration configuration, String platformId) {
+    private static boolean isAutoCreateEnabled(Configuration configuration, String platformId) {
         return configuration.getBooleanProperty(
                 String.format("wayang.%s.parquetsource.auto-create", platformId),
                 false
         );
     }
 
-    private String createGeneratedRelationName(Configuration configuration, String platformId) {
+    private static String createGeneratedRelationName(Configuration configuration, String platformId, String inputUrl) {
         final String prefix = configuration.getStringProperty(
                 String.format("wayang.%s.parquetsource.auto-create.relation-prefix", platformId),
                 "wayang_parquet_"
         );
-        return prefix + this.shortHash(this.getInputUrl());
+        return prefix + shortHash(inputUrl);
     }
 
-    private String shortHash(String value) {
+    private static String shortHash(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));

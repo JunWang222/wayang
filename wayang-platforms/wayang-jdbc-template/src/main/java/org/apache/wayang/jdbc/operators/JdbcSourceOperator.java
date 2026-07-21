@@ -51,6 +51,14 @@ public interface JdbcSourceOperator extends JdbcExecutionOperator {
         return this.createSqlClause(connection, compiler);
     }
 
+    /**
+     * Prepares this source for SQL generation, e.g., by registering a temporary
+     * relation. Implementations can keep this as a no-op when no preparation is
+     * required.
+     */
+    default void prepareSource(Connection connection, FunctionCompiler compiler, Configuration configuration) {
+    }
+
     @Override
     default List<ChannelDescriptor> getSupportedInputChannels(int index) {
         throw new UnsupportedOperationException("JDBC source operators have no input channels.");
