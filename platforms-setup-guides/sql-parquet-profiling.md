@@ -226,3 +226,57 @@ This verifies the Wayang `ParquetSource` mapping and BigQuery SQL join path, but
 it is not the final shared external-Parquet validation because BigQuery reads
 native tables after the load job. Use the GCS external-table flow when a bucket
 is available.
+
+## Trino And Presto Fallback Without Shared Storage
+
+If no shared GCS/S3 bucket is available, Trino and Presto can still validate the
+Wayang `ParquetSource` mapping and SQL join execution path with their memory
+connectors. This does not prove that Trino/Presto read external Parquet files;
+it is a smoke test for the Wayang SQL path.
+
+Start and prepare Trino:
+
+```powershell
+.\tools\parquet-profile\prepare-sql-memory-parquet-tables.ps1 `
+  -TargetPlatform trino `
+  -StartContainer
+```
+
+Run the Trino profiling target:
+
+```powershell
+$env:WAYANG_TRINO_JDBC_URL = "jdbc:trino://localhost:8080"
+$env:WAYANG_TRINO_JDBC_USER = "admin"
+$env:WAYANG_TRINO_JDBC_PASSWORD = ""
+
+.\tools\parquet-profile\run-sql-parquet-join-profiling.ps1 `
+  -TargetPlatform trino `
+  -OrdersUri "file:///C:/wayang/target/shared-parquet-profile/orders.parquet" `
+  -CustomersUri "file:///C:/wayang/target/shared-parquet-profile/customers.parquet" `
+  -OrdersRelation "memory.wayang_profile.orders_parquet_native" `
+  -CustomersRelation "memory.wayang_profile.customers_parquet_native" `
+  -SinkRelation "memory.wayang_profile.join_profile_out"
+```
+
+Start and prepare Presto:
+
+```powershell
+.\tools\parquet-profile\prepare-sql-memory-parquet-tables.ps1 `
+  -TargetPlatform presto `
+  -StartContainer
+```
+
+Run the Presto profiling target:
+
+```powershell
+$env:WAYANG_PRESTO_JDBC_URL = "jdbc:presto://localhost:8081/memory"
+$env:WAYANG_PRESTO_JDBC_USER = "test"
+
+.\tools\parquet-profile\run-sql-parquet-join-profiling.ps1 `
+  -TargetPlatform presto `
+  -OrdersUri "file:///C:/wayang/target/shared-parquet-profile/orders.parquet" `
+  -CustomersUri "file:///C:/wayang/target/shared-parquet-profile/customers.parquet" `
+  -OrdersRelation "memory.wayang_profile.orders_parquet_native" `
+  -CustomersRelation "memory.wayang_profile.customers_parquet_native" `
+  -SinkRelation "memory.wayang_profile.join_profile_out"
+```
