@@ -190,3 +190,39 @@ target/cost-profiling/parquet-sql/executions.json
 target/cost-profiling/parquet-sql/cardinalities.json
 target/cost-profiling/parquet-sql/manifest.csv
 ```
+
+## BigQuery Fallback Without A GCS Bucket
+
+If the GCP project cannot create a GCS bucket, the external-table flow above
+cannot be completed. As a temporary smoke test, load the generated Parquet files
+into native BigQuery tables and map the logical `ParquetSource` URIs to those
+tables:
+
+```powershell
+.\tools\parquet-profile\prepare-bigquery-native-parquet-tables.ps1 `
+  -ProjectId "hw2-project-487519" `
+  -Dataset "wayang_profile" `
+  -HttpProxy "http://127.0.0.1:7890"
+```
+
+Then run the profiling IT against the loaded tables:
+
+```powershell
+$env:HTTP_PROXY = "http://127.0.0.1:7890"
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"
+$env:JAVA_TOOL_OPTIONS = "-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890"
+$env:WAYANG_BIGQUERY_JDBC_URL = "jdbc:bigquery://https://www.googleapis.com/bigquery/v2;ProjectId=hw2-project-487519;OAuthType=0;OAuthServiceAcctEmail=wayang-bq@hw2-project-487519.iam.gserviceaccount.com;OAuthPvtKeyPath=C:/Users/jizhi/wayang-bq-key.json;Location=US"
+
+.\tools\parquet-profile\run-sql-parquet-join-profiling.ps1 `
+  -TargetPlatform bigquery `
+  -OrdersUri "file:///C:/wayang/target/shared-parquet-profile/orders.parquet" `
+  -CustomersUri "file:///C:/wayang/target/shared-parquet-profile/customers.parquet" `
+  -OrdersRelation "`hw2-project-487519.wayang_profile.orders_parquet_native`" `
+  -CustomersRelation "`hw2-project-487519.wayang_profile.customers_parquet_native`" `
+  -SinkRelation "`hw2-project-487519.wayang_profile.join_profile_out`"
+```
+
+This verifies the Wayang `ParquetSource` mapping and BigQuery SQL join path, but
+it is not the final shared external-Parquet validation because BigQuery reads
+native tables after the load job. Use the GCS external-table flow when a bucket
+is available.

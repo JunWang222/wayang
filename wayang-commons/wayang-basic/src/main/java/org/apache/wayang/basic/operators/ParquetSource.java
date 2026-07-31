@@ -206,6 +206,11 @@ public class ParquetSource extends UnarySource<Record> {
          * @return the number of rows in the file
          */
         private OptionalLong extractNumberRows() {
+            if (ParquetSource.this.metadata == null) {
+                ParquetSource.this.logger.warn("Could not inspect metadata of {}.", ParquetSource.this.inputUrl);
+                return OptionalLong.empty();
+            }
+
             long rowCount = ParquetSource.this.metadata.getBlocks().stream()
                     .mapToLong(BlockMetaData::getRowCount)
                     .sum();

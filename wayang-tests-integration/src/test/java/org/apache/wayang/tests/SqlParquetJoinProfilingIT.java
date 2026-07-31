@@ -173,6 +173,11 @@ class SqlParquetJoinProfilingIT {
         );
         MapOperator<Tuple2<Record, Record>, Record> flatten = joinFlattenOperator();
         TableSink<Record> sink = new TableSink<>(new Properties(), "overwrite", sinkRelation, JOIN_COLUMNS);
+
+        orders.addTargetPlatform(targetPlatform);
+        customers.addTargetPlatform(targetPlatform);
+        join.addTargetPlatform(targetPlatform);
+        flatten.addTargetPlatform(targetPlatform);
         sink.addTargetPlatform(targetPlatform);
 
         orders.connectTo(0, join, 0);
