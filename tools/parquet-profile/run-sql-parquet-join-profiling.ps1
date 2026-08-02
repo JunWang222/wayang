@@ -30,7 +30,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$SinkRelation,
     [string]$ExpectedRows = "12",
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$InProcessTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +56,7 @@ Write-Host "WAYANG_PROFILE_PARQUET_${targetPrefix}_ORDERS_RELATION=$OrdersRelati
 Write-Host "WAYANG_PROFILE_PARQUET_${targetPrefix}_CUSTOMERS_RELATION=$CustomersRelation"
 Write-Host "WAYANG_PROFILE_PARQUET_${targetPrefix}_SINK_RELATION=$SinkRelation"
 Write-Host "WAYANG_PROFILE_PARQUET_EXPECTED_ROWS=$ExpectedRows"
+Write-Host "IN_PROCESS_TESTS=$InProcessTests"
 
 if ($DryRun) {
     Write-Host "Dry run only. Re-run without -DryRun to execute SqlParquetJoinProfilingIT."
@@ -63,11 +65,21 @@ if ($DryRun) {
 
 Push-Location $repoRoot
 try {
-    .\mvnw.cmd -pl wayang-tests-integration `
-        "-Dtest=SqlParquetJoinProfilingIT" `
-        "-Dsurefire.failIfNoSpecifiedTests=false" `
-        "-Drat.skip=true" "-Dlicense.skip=true" `
-        -Pskip-prerequisite-check test
+    $mavenArgs = @(
+        "-pl",
+        "wayang-tests-integration",
+        "-Dtest=SqlParquetJoinProfilingIT",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "-Drat.skip=true",
+        "-Dlicense.skip=true",
+        "-Pskip-prerequisite-check",
+        "test"
+    )
+    if ($InProcessTests) {
+        $mavenArgs += "-DforkCount=0"
+        $mavenArgs += "-DreuseForks=false"
+    }
+    .\mvnw.cmd @mavenArgs
 } finally {
     Pop-Location
 }

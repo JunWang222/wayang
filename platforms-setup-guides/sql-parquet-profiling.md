@@ -191,6 +191,66 @@ target/cost-profiling/parquet-sql/cardinalities.json
 target/cost-profiling/parquet-sql/manifest.csv
 ```
 
+## Local Shared Parquet With Trino And Presto
+
+For local validation without a cloud bucket, use MinIO as shared object storage
+and Hive Metastore as the shared catalog. This proves that Trino and Presto read
+the same external Parquet files instead of using platform-local memory tables.
+
+Start the Trino shared-storage stack and the Presto stack, upload the Parquet
+files, and create the Hive external tables:
+
+```powershell
+.\tools\parquet-profile\prepare-sql-shared-parquet-tables.ps1 -StartContainers
+```
+
+The script prints:
+
+```text
+orders_uri=s3a://warehouse/wayang-profile/orders/
+customers_uri=s3a://warehouse/wayang-profile/customers/
+orders_relation=hive.wayang_profile.orders_ext
+customers_relation=hive.wayang_profile.customers_ext
+trino_sink_relation=hive.wayang_profile.join_profile_out
+presto_sink_relation=hive.wayang_profile.join_profile_out_presto
+expected_join_rows=12
+```
+
+Run the Trino target:
+
+```powershell
+$env:MAVEN_OPTS = "-Xmx384m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m -XX:+UseSerialGC -Xss512k"
+
+.\tools\parquet-profile\run-sql-parquet-join-profiling.ps1 `
+  -TargetPlatform trino `
+  -OrdersUri "s3a://warehouse/wayang-profile/orders/" `
+  -CustomersUri "s3a://warehouse/wayang-profile/customers/" `
+  -OrdersRelation "hive.wayang_profile.orders_ext" `
+  -CustomersRelation "hive.wayang_profile.customers_ext" `
+  -SinkRelation "hive.wayang_profile.join_profile_out" `
+  -InProcessTests
+```
+
+Run the Presto target over the same Parquet-backed Hive tables:
+
+```powershell
+$env:MAVEN_OPTS = "-Xmx384m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m -XX:+UseSerialGC -Xss512k"
+
+.\tools\parquet-profile\run-sql-parquet-join-profiling.ps1 `
+  -TargetPlatform presto `
+  -OrdersUri "s3a://warehouse/wayang-profile/orders/" `
+  -CustomersUri "s3a://warehouse/wayang-profile/customers/" `
+  -OrdersRelation "hive.wayang_profile.orders_ext" `
+  -CustomersRelation "hive.wayang_profile.customers_ext" `
+  -SinkRelation "hive.wayang_profile.join_profile_out_presto" `
+  -InProcessTests
+```
+
+BigQuery cannot read a local MinIO bucket, so the true three-engine shared
+external-Parquet validation still needs a cloud bucket that BigQuery can access,
+such as GCS. The local MinIO path validates the shared-storage design for Trino
+and Presto and keeps the same Wayang `ParquetSource` mapping flow.
+
 ## BigQuery Fallback Without A GCS Bucket
 
 If the GCP project cannot create a GCS bucket, the external-table flow above
