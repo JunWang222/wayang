@@ -38,8 +38,8 @@ $ordersUri = "$gcsRoot/orders.parquet"
 $customersUri = "$gcsRoot/customers.parquet"
 $ordersDirectoryUri = "$gcsRoot/orders/"
 $customersDirectoryUri = "$gcsRoot/customers/"
-$ordersDirectoryFileUri = "$ordersDirectoryUri/orders.parquet"
-$customersDirectoryFileUri = "$customersDirectoryUri/customers.parquet"
+$ordersDirectoryFileUri = "$gcsRoot/orders/orders.parquet"
+$customersDirectoryFileUri = "$gcsRoot/customers/customers.parquet"
 $ordersPath = Join-Path $repoRoot "$OutputDir\orders.parquet"
 $customersPath = Join-Path $repoRoot "$OutputDir\customers.parquet"
 $ordersRelation = "``$ProjectId.$Dataset.orders_ext``"
@@ -106,30 +106,8 @@ try {
 
     bq --project_id=$ProjectId --location=$Location mk --dataset $Dataset 2>$null
 
-    $ordersSql = @"
-CREATE OR REPLACE EXTERNAL TABLE $ordersRelation (
-  order_id INT64,
-  customer_id INT64,
-  region STRING,
-  amount FLOAT64,
-  bucket INT64
-)
-OPTIONS (
-  format = 'PARQUET',
-  uris = ['$ordersUri']
-);
-"@
-
-    $customersSql = @"
-CREATE OR REPLACE EXTERNAL TABLE $customersRelation (
-  cust_id INT64,
-  tier STRING
-)
-OPTIONS (
-  format = 'PARQUET',
-  uris = ['$customersUri']
-);
-"@
+    $ordersSql = "CREATE OR REPLACE EXTERNAL TABLE $ordersRelation (order_id INT64, customer_id INT64, region STRING, amount FLOAT64, bucket INT64) OPTIONS (format = 'PARQUET', uris = ['$ordersUri']);"
+    $customersSql = "CREATE OR REPLACE EXTERNAL TABLE $customersRelation (cust_id INT64, tier STRING) OPTIONS (format = 'PARQUET', uris = ['$customersUri']);"
 
     Invoke-CheckedCommand {
         bq --project_id=$ProjectId --location=$Location query --use_legacy_sql=false $ordersSql
