@@ -205,8 +205,12 @@ from GCS.
   -Location "US"
 ```
 
-The script prints the canonical Parquet URIs and BigQuery relations. Run the
-BigQuery profiling target with those values:
+The script prints the canonical Parquet URIs and BigQuery relations. It also
+uploads Hive-friendly directory copies under `orders/` and `customers/` so that
+Trino and Presto can use the same GCS bucket after their Hive catalog and Hive
+Metastore are configured for `gs://` locations.
+
+Run the BigQuery profiling target with the single-file values:
 
 ```powershell
 $env:JAVA_TOOL_OPTIONS = "-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890"

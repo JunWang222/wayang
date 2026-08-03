@@ -36,6 +36,10 @@ $normalizedPrefix = $GcsPrefix.Trim("/")
 $gcsRoot = "gs://$bucketName/$normalizedPrefix"
 $ordersUri = "$gcsRoot/orders.parquet"
 $customersUri = "$gcsRoot/customers.parquet"
+$ordersDirectoryUri = "$gcsRoot/orders/"
+$customersDirectoryUri = "$gcsRoot/customers/"
+$ordersDirectoryFileUri = "$ordersDirectoryUri/orders.parquet"
+$customersDirectoryFileUri = "$customersDirectoryUri/customers.parquet"
 $ordersPath = Join-Path $repoRoot "$OutputDir\orders.parquet"
 $customersPath = Join-Path $repoRoot "$OutputDir\customers.parquet"
 $ordersRelation = "``$ProjectId.$Dataset.orders_ext``"
@@ -57,6 +61,8 @@ function Invoke-CheckedCommand {
 function Write-PreparedValues {
     Write-Host "orders_uri=$ordersUri"
     Write-Host "customers_uri=$customersUri"
+    Write-Host "orders_directory_uri=$ordersDirectoryUri"
+    Write-Host "customers_directory_uri=$customersDirectoryUri"
     Write-Host "orders_relation=$ordersRelation"
     Write-Host "customers_relation=$customersRelation"
     Write-Host "sink_relation=$sinkRelation"
@@ -91,6 +97,12 @@ try {
     Invoke-CheckedCommand {
         gsutil cp $customersPath $customersUri
     } "Uploading customers Parquet to GCS"
+    Invoke-CheckedCommand {
+        gsutil cp $ordersPath $ordersDirectoryFileUri
+    } "Uploading Hive-friendly orders Parquet directory to GCS"
+    Invoke-CheckedCommand {
+        gsutil cp $customersPath $customersDirectoryFileUri
+    } "Uploading Hive-friendly customers Parquet directory to GCS"
 
     bq --project_id=$ProjectId --location=$Location mk --dataset $Dataset 2>$null
 
