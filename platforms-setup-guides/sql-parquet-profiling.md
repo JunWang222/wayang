@@ -191,6 +191,38 @@ target/cost-profiling/parquet-sql/cardinalities.json
 target/cost-profiling/parquet-sql/manifest.csv
 ```
 
+## BigQuery With GCS External Parquet
+
+Use this path when a billing-enabled GCP project and GCS bucket are available.
+It creates BigQuery external tables that read the shared Parquet files directly
+from GCS.
+
+```powershell
+.\tools\parquet-profile\prepare-bigquery-external-parquet-tables.ps1 `
+  -ProjectId "YOUR_PROJECT" `
+  -Bucket "YOUR_BUCKET" `
+  -Dataset "wayang_profile" `
+  -Location "US"
+```
+
+The script prints the canonical Parquet URIs and BigQuery relations. Run the
+BigQuery profiling target with those values:
+
+```powershell
+$env:JAVA_TOOL_OPTIONS = "-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890"
+$env:MAVEN_OPTS = "-Xmx384m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m -XX:+UseSerialGC -Xss512k"
+$env:WAYANG_BIGQUERY_JDBC_URL = "jdbc:bigquery://https://www.googleapis.com/bigquery/v2;ProjectId=YOUR_PROJECT;OAuthType=0;OAuthServiceAcctEmail=YOUR_SERVICE_ACCOUNT;OAuthPvtKeyPath=C:/path/to/key.json;Location=US"
+
+.\tools\parquet-profile\run-sql-parquet-join-profiling.ps1 `
+  -TargetPlatform bigquery `
+  -OrdersUri "gs://YOUR_BUCKET/wayang-profile/orders.parquet" `
+  -CustomersUri "gs://YOUR_BUCKET/wayang-profile/customers.parquet" `
+  -OrdersRelation "`YOUR_PROJECT.wayang_profile.orders_ext`" `
+  -CustomersRelation "`YOUR_PROJECT.wayang_profile.customers_ext`" `
+  -SinkRelation "`YOUR_PROJECT.wayang_profile.join_profile_out`" `
+  -InProcessTests
+```
+
 ## Local Shared Parquet With Trino And Presto
 
 For local validation without a cloud bucket, use MinIO as shared object storage
