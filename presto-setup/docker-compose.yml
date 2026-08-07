@@ -36,9 +36,6 @@ services:
     volumes:
       # Enable the in-memory connector by adding a catalog properties file.
       - ./etc/catalog/memory.properties:/opt/presto-server/etc/catalog/memory.properties
-      # Enable shared external-Parquet tests against the Trino guide stack's
-      # Hive Metastore and MinIO object store.
-      - ./etc/catalog/hive.properties:/opt/presto-server/etc/catalog/hive.properties
     # Presto needs ~20-60s before it accepts queries. Gate on /v1/info so callers
     # (and `docker compose up -d --wait`) can wait for readiness; the container
     # reports "Up" long before the coordinator is ready.
@@ -48,11 +45,3 @@ services:
       timeout: 5s
       retries: 15
       start_period: 30s
-    networks:
-      - default
-      - trino-shared
-
-networks:
-  trino-shared:
-    external: true
-    name: trino-setup_default
