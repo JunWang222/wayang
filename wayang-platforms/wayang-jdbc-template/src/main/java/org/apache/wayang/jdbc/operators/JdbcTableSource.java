@@ -86,7 +86,7 @@ public abstract class JdbcTableSource extends TableSource implements JdbcSourceO
                         .createJdbcConnection()) {
 
                     // Query the table cardinality.
-                    // No trailing ';' — strict parsers (Trino, BigQuery) reject it in executeQuery.
+                    // No trailing ';': strict parsers (Trino, BigQuery) reject it in executeQuery.
                     final String sql = String.format("SELECT count(*) FROM %s", JdbcTableSource.this.getTableName());
                     final ResultSet resultSet = connection.createStatement().executeQuery(sql);
                     if (!resultSet.next()) {
