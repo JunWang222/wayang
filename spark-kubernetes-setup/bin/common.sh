@@ -21,6 +21,7 @@ SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="wayang-profiling"
 PROFILE="${WAYANG_MINIKUBE_PROFILE:-wayang-profiling}"
 IMAGE="wayang/spark-kubernetes-smoke:3.5.7"
+WAYANG_IMAGE="wayang/wayang-profiler-kubernetes:3.5.7"
 
 find_minikube() {
     if command -v minikube >/dev/null 2>&1; then

@@ -204,7 +204,10 @@ public class Main {
         try {
             System.out.println("Prepare...");
             final TimeMeasurement preparation = stopWatch.start("Preparation");
-            SparkPlatform.getInstance().warmUp(new Configuration());
+            final Configuration configuration = new Configuration();
+            if (configuration.getBooleanProperty("wayang.profiler.spark.warmup.enabled", true)) {
+                SparkPlatform.getInstance().warmUp(configuration);
+            }
             opProfiler.prepare(cardinalities);
             preparation.stop();
 

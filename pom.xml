@@ -1060,6 +1060,11 @@
                         <exclude>**/target/**</exclude>
                         <exclude>target/**</exclude>
 
+                        <!-- Local Spark-on-Kubernetes build and run artifacts -->
+                        <exclude>spark-kubernetes-setup/.build/**</exclude>
+                        <exclude>spark-kubernetes-setup/.tools/**</exclude>
+                        <exclude>spark-kubernetes-setup/artifacts/**</exclude>
+
                         <!-- Eclipse related files -->
                         <exclude>**/.project</exclude>
                         <exclude>**/.settings/**</exclude>

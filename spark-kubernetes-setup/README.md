@@ -17,17 +17,21 @@
 
 # Spark on Kubernetes profiling foundation
 
-This directory provides a reproducible local Kubernetes environment for the
-first stage of Apache Wayang's Spark operator profiling work. It deliberately
-starts with a standalone Spark Join smoke test. Once the infrastructure is
-stable, the same image and submission path can be extended with the Wayang
-Spark profiler.
+This directory provides a reproducible local Kubernetes environment for Apache
+Wayang's Spark operator profiling work. It includes both a standalone Spark
+Join smoke test and an end-to-end run of Wayang's `SparkJoinOperator` profiler.
 
 The smoke test creates one Spark driver pod and three executor pods, runs an
 RDD Join that requires shuffle, prints aggregated Spark task metrics, and
 copies the driver log and Spark event log into `artifacts/`. Event logs are
 written to a namespace-scoped persistent volume so they remain available after
 the driver pod completes.
+
+The Wayang run builds the profiler from the current checkout, packages it in a
+Java 17 Spark 3.5.7 image, and invokes
+`org.apache.wayang.profiler.spark.Main join` with one driver and three
+executors. Its driver log, profiler CSV, raw event log, and aggregated task
+metrics are copied into `artifacts/latest-wayang/`.
 
 ## Architecture
 
@@ -92,6 +96,44 @@ The summary contains Spark-level shuffle read/write bytes, remote shuffle
 read bytes, spills, executor runtime, and executor CPU time. The raw Spark
 event log is saved under `artifacts/latest/spark-events/` for later analysis.
 
+## Run the Wayang Join profiler
+
+From the repository root, the complete end-to-end path is:
+
+```bash
+spark-kubernetes-setup/bin/run-wayang.sh
+```
+
+If the cluster is already running, the stages can be invoked separately:
+
+```bash
+spark-kubernetes-setup/bin/build-wayang-image.sh
+spark-kubernetes-setup/bin/submit-wayang.sh
+spark-kubernetes-setup/bin/verify-wayang.sh
+```
+
+The verifier requires `python3` and creates:
+
+```text
+artifacts/latest-wayang/
+|-- driver.log
+|-- metrics.json
+`-- spark-events/
+    `-- <Spark application event log>
+```
+
+`driver.log` contains the profiler result in its existing CSV format. Ganglia
+collection is disabled in Kubernetes, so its `disk`, `network`, and `cpu`
+columns use `-1` to mean unavailable. `metrics.json` replaces those legacy
+host-level readings with Spark-native task metrics, including per-stage and
+whole-application shuffle read/write bytes, remote reads, spills, executor
+runtime, executor CPU time, GC time, and input/output bytes.
+
+The whole-application aggregate includes input preparation and the profiler's
+second action for output cardinality. Use the per-stage entries when isolating
+the measured Join: stages named `mapToPair at SparkJoinOperator` write its
+shuffle, and `foreach at BinaryOperatorProfiler` is the timed Join action.
+
 ## Configuration
 
 The scripts accept the following environment variables:
@@ -101,7 +143,7 @@ The scripts accept the following environment variables:
 | `WAYANG_MINIKUBE_PROFILE` | `wayang-profiling` | Isolated minikube profile |
 | `WAYANG_MINIKUBE_CPUS` | `4` | CPUs assigned to minikube |
 | `WAYANG_MINIKUBE_MEMORY` | `6144` | Memory assigned to minikube, in MiB |
-| `WAYANG_K8S_TIMEOUT_SECONDS` | `600` | Verification timeout |
+| `WAYANG_K8S_TIMEOUT_SECONDS` | `600` / `900` | Smoke / Wayang verification timeout |
 
 The Spark version is intentionally pinned to 3.5.7 to match Wayang's current
 root Maven configuration.
@@ -123,8 +165,10 @@ after the driver completes.
 ## Current scope and next step
 
 This foundation validates Kubernetes scheduling, Spark's driver/executor
-lifecycle, shuffle execution, and metric collection. It does not yet package
-or submit the Wayang profiler. The next step is to build a Wayang-aware Spark
-image and run `org.apache.wayang.profiler.spark.Main join` through the same
-submission path, then replace the profiler's legacy Ganglia dependency with
-Spark event-log/task metrics where appropriate.
+lifecycle, a real Wayang Join, and reproducible metric collection. For
+Kubernetes compatibility, the profiler warm-up is disabled because it stops
+the cluster-mode Spark context and removes the driver service before the
+measured run. The next research step is a controlled experiment matrix over
+input cardinality, key distribution, partitions, executor count, cores, and
+memory, followed by extraction of operator-level cost-model features from the
+per-stage metrics.

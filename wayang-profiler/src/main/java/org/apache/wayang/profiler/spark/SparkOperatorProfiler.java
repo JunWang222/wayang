@@ -50,6 +50,8 @@ import java.util.function.Supplier;
  */
 public abstract class SparkOperatorProfiler {
 
+    private static final long UNAVAILABLE_METRIC = -1L;
+
     protected final Logger logger = LogManager.getLogger(this.getClass());
 
     protected Supplier<SparkExecutionOperator> operatorGenerator;
@@ -59,6 +61,8 @@ public abstract class SparkOperatorProfiler {
     private final String gangliaRrdsDir;
 
     private final String gangliaClusterName;
+
+    private final boolean isGangliaEnabled;
 
     public int cpuMhz, numMachines, numCoresPerMachine, numPartitions;
 
@@ -90,6 +94,7 @@ public abstract class SparkOperatorProfiler {
 
         this.gangliaRrdsDir = configuration.getStringProperty("wayang.ganglia.rrds", "/var/lib/ganglia/rrds");
         this.gangliaClusterName = configuration.getStringProperty("wayang.ganglia.cluster", "cluster");
+        this.isGangliaEnabled = configuration.getBooleanProperty("wayang.profiler.ganglia.enabled", true);
 
         this.dataQuantumGeneratorBatchSize = (int) configuration.getLongProperty("wayang.profiler.datagen.batchsize", 5000000);
         this.dataQuantumGeneratorLocation = configuration.getStringProperty("wayang.profiler.datagen.location", "worker");
@@ -213,6 +218,10 @@ public abstract class SparkOperatorProfiler {
      * the respective information in its RRD files.
      */
     protected long provideCpuCycles(long startTime, long endTime) {
+        if (!this.isGangliaEnabled) {
+            return UNAVAILABLE_METRIC;
+        }
+
         // Find out the average idle fraction in the cluster.
         final double sumCpuIdleRatio = this.waitAndQueryMetricAverage("cpu_idle", "sum", startTime, endTime);
         final double numCpuIdleRatio = this.waitAndQueryMetricAverage("cpu_idle", "num", startTime, endTime);
@@ -231,6 +240,10 @@ public abstract class SparkOperatorProfiler {
      * the respective information in its RRD files.
      */
     protected long provideNetworkBytes(long startTime, long endTime) {
+        if (!this.isGangliaEnabled) {
+            return UNAVAILABLE_METRIC;
+        }
+
         // Find out the average received/transmitted bytes per second.
         final double transmittedBytesPerSec = this.waitAndQueryMetricAverage("tx_bytes_eth0", "sum", startTime, endTime);
         final double receivedBytesPerSec = this.waitAndQueryMetricAverage("rx_bytes_eth0", "sum", startTime, endTime);
@@ -246,6 +259,10 @@ public abstract class SparkOperatorProfiler {
      * the respective information in its RRD files.
      */
     protected long provideDiskBytes(long startTime, long endTime) {
+        if (!this.isGangliaEnabled) {
+            return UNAVAILABLE_METRIC;
+        }
+
         // Find out the average received/transmitted bytes per second.
         final double readBytesPerSec = this.waitAndQueryMetricAverage("diskstat_sda_read_bytes_per_sec", "sum", startTime, endTime);
         final double writeBytesPerSec = this.waitAndQueryMetricAverage("diskstat_sda_read_bytes_per_sec", "sum", startTime, endTime);
@@ -320,7 +337,10 @@ public abstract class SparkOperatorProfiler {
      */
     protected static RddChannel.Instance createChannelInstance(SparkExecutor sparkExecutor) {
         final ChannelDescriptor channelDescriptor = RddChannel.CACHED_DESCRIPTOR;
-        final RddChannel channel = (RddChannel) channelDescriptor.createChannel(null, sparkExecutor.getConfiguration());
+        final RddChannel channel = (RddChannel) channelDescriptor.createChannel(
+                null,
+                sparkExecutor.getJob().getConfiguration()
+        );
         return (RddChannel.Instance) channel.createInstance(null, null, -1);
     }
 
