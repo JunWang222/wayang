@@ -15,23 +15,28 @@
   limitations under the License.
 -->
 
-# Spark on Kubernetes profiling foundation
+# Reproducible Spark experiments on Kubernetes
 
-This directory provides a reproducible local Kubernetes environment for Apache
-Wayang's Spark operator profiling work. It includes both a standalone Spark
-Join smoke test and an end-to-end run of Wayang's `SparkJoinOperator` profiler.
+This directory provides a reusable local Kubernetes foundation for Spark and
+Apache Wayang experiments. Its purpose is to make the deployment topology,
+software versions, resource settings, submission path, and collected artifacts
+repeatable. It does not prescribe the workloads or experiment matrix for a
+particular study.
 
-The smoke test creates one Spark driver pod and three executor pods, runs an
-RDD Join that requires shuffle, prints aggregated Spark task metrics, and
-copies the driver log and Spark event log into `artifacts/`. Event logs are
-written to a namespace-scoped persistent volume so they remain available after
-the driver pod completes.
+Two Join workloads are included only as reference validations. They exercise
+multiple executors, shuffle, inter-pod communication, persistent event logs,
+and metric extraction. Future experiments can replace them with another Spark
+or Wayang application while reusing the same namespace, RBAC, storage, and
+artifact-collection pattern.
 
-The Wayang run builds the profiler from the current checkout, packages it in a
-Java 17 Spark 3.5.7 image, and invokes
-`org.apache.wayang.profiler.spark.Main join` with one driver and three
-executors. Its driver log, profiler CSV, raw event log, and aggregated task
-metrics are copied into `artifacts/latest-wayang/`.
+## Platform components
+
+- An isolated `wayang-profiling` namespace.
+- Namespace-scoped RBAC for Spark driver and executor lifecycle operations.
+- Persistent Spark event-log storage and a read-only log-export pod.
+- Pinned Spark 3.5.7 images, with Java 17 for the Wayang runtime.
+- Cluster-mode Spark submission with explicit driver and executor resources.
+- Export of driver logs, raw Spark event logs, task metrics, and run metadata.
 
 ## Architecture
 
@@ -68,7 +73,11 @@ spark-kubernetes-setup/.tools/minikube
 
 The `.tools/` directory is ignored by Git.
 
-## Run the complete smoke test
+## Reference workload 1: standalone Spark Join
+
+This is an infrastructure smoke test, not a prescribed paper experiment. It
+uses a small standalone Spark application to verify the Kubernetes path without
+depending on Wayang.
 
 From the repository root:
 
@@ -94,9 +103,16 @@ WAYANG_K8S_METRICS_SUMMARY ...
 
 The summary contains Spark-level shuffle read/write bytes, remote shuffle
 read bytes, spills, executor runtime, and executor CPU time. The raw Spark
-event log is saved under `artifacts/latest/spark-events/` for later analysis.
+event log is saved under `artifacts/latest/spark-events/` for later analysis,
+and `artifacts/latest/run-metadata.json` records the environment and submitted
+command.
 
-## Run the Wayang Join profiler
+## Reference workload 2: Wayang Join profiler
+
+This validation demonstrates that an application built from the current
+Wayang checkout can use the same Kubernetes foundation. Join was selected
+because it exercises distributed shuffle; it is not the only workload that
+the platform is intended to support.
 
 From the repository root, the complete end-to-end path is:
 
@@ -118,6 +134,7 @@ The verifier requires `python3` and creates:
 artifacts/latest-wayang/
 |-- driver.log
 |-- metrics.json
+|-- run-metadata.json
 `-- spark-events/
     `-- <Spark application event log>
 ```
@@ -134,6 +151,12 @@ second action for output cardinality. Use the per-stage entries when isolating
 the measured Join: stages named `mapToPair at SparkJoinOperator` write its
 shuffle, and `foreach at BinaryOperatorProfiler` is the timed Join action.
 
+Both reference verifiers create `run-metadata.json`. It records the workload,
+Git commit and dirty state, host architecture, Kubernetes context and version,
+minikube profile and version, driver image ID, Spark version label, container
+resources, and the complete submitted command. This provides the provenance
+needed to reproduce a run without assuming that timing will be identical.
+
 ## Configuration
 
 The scripts accept the following environment variables:
@@ -147,6 +170,24 @@ The scripts accept the following environment variables:
 
 The Spark version is intentionally pinned to 3.5.7 to match Wayang's current
 root Maven configuration.
+
+## Add another workload
+
+A new workload does not require changing the base cluster. Use the existing
+submitter Jobs as references and provide:
+
+1. A versioned container image containing the application and its runtime.
+2. A Kubernetes Job that invokes `spark-submit` in cluster mode.
+3. Explicit driver, executor, memory, core, and partition settings.
+4. The `spark-event-logs` PVC mounted in the driver pod.
+5. A unique application label so its driver can be selected reliably.
+6. A verifier that exports the driver log and event log and invokes
+   `write-run-metadata.py`; use `summarize-event-log.py` when Spark task metrics
+   are required.
+
+The application class, arguments, data, and experiment parameters belong to
+the workload definition. They are intentionally not imposed by the Kubernetes
+foundation.
 
 ## Inspect a run
 
@@ -162,13 +203,20 @@ clean up Spark driver/executor resources. A small reader pod mounts the event
 log persistent volume read-only so the verification script can export logs
 after the driver completes.
 
-## Current scope and next step
+## Reproducibility scope and limitations
 
-This foundation validates Kubernetes scheduling, Spark's driver/executor
-lifecycle, a real Wayang Join, and reproducible metric collection. For
-Kubernetes compatibility, the profiler warm-up is disabled because it stops
-the cluster-mode Spark context and removes the driver service before the
-measured run. The next research step is a controlled experiment matrix over
-input cardinality, key distribution, partitions, executor count, cores, and
-memory, followed by extraction of operator-level cost-model features from the
-per-stage metrics.
+The committed manifests and scripts reproduce the software topology and record
+the configuration of each run. Workload inputs and random seeds must also be
+fixed by each experiment when deterministic data is required.
+
+Minikube runs all pods on one physical node. It is appropriate for validating
+deployment, logical shuffle volume, metric collection, and repeatability of the
+workflow. Its wall-clock and network behavior must not be presented as
+representative of a physical multi-node cluster. The paper team should define
+the final workloads, input distributions, resource matrix, repetition policy,
+and target cluster before collecting study results.
+
+For Kubernetes compatibility, the Wayang reference workload disables the
+profiler warm-up because that warm-up stops the cluster-mode Spark context and
+removes the driver service before the measured run. This is specific to the
+reference workload and does not alter the base Kubernetes environment.

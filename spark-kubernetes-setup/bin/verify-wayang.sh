@@ -65,10 +65,17 @@ artifact_dir="${SETUP_DIR}/artifacts/wayang-${run_id}"
 mkdir -p "${artifact_dir}"
 cp /tmp/wayang-profiler-k8s-driver.log "${artifact_dir}/driver.log"
 
+app_id="$(kubectl get pod "${driver_pod}" \
+    --namespace "${NAMESPACE}" \
+    --output jsonpath='{.metadata.labels.spark-app-selector}')"
+if [[ ! "${app_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf '%s\n' "The Spark application ID is missing or invalid: ${app_id}" >&2
+    exit 1
+fi
 event_log="$(kubectl exec \
     spark-event-log-reader \
     --namespace "${NAMESPACE}" \
-    -- sh -c 'ls -1t /var/spark-events | head -n 1')"
+    -- sh -c "ls -1 /var/spark-events/${app_id}* 2>/dev/null | head -n 1 | xargs basename")"
 if [[ -z "${event_log}" ]]; then
     printf '%s\n' "No Spark event log was written for the Wayang profiler." >&2
     exit 1
@@ -80,6 +87,13 @@ kubectl cp \
 "${SETUP_DIR}/bin/summarize-event-log.py" \
     "${artifact_dir}/spark-events/${event_log}" \
     > "${artifact_dir}/metrics.json"
+"${SETUP_DIR}/bin/write-run-metadata.py" \
+    --output "${artifact_dir}/run-metadata.json" \
+    --namespace "${NAMESPACE}" \
+    --driver-pod "${driver_pod}" \
+    --submitter-job wayang-join-submit \
+    --workload wayang-join-reference \
+    --minikube-profile "${PROFILE}"
 ln -sfn "wayang-${run_id}" "${SETUP_DIR}/artifacts/latest-wayang"
 
 printf '%s\n' "Wayang Spark Join profiler passed."

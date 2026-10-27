@@ -18,6 +18,7 @@
 source "$(dirname "$0")/common.sh"
 
 require_command kubectl
+require_command python3
 
 deadline=$((SECONDS + ${WAYANG_K8S_TIMEOUT_SECONDS:-600}))
 driver_pod=""
@@ -25,7 +26,7 @@ driver_pod=""
 while [[ -z "${driver_pod}" && ${SECONDS} -lt ${deadline} ]]; do
     driver_pod="$(kubectl get pods \
         --namespace "${NAMESPACE}" \
-        --selector 'spark-role=driver' \
+        --selector 'spark-role=driver,spark-app-name=spark-join-smoke' \
         --sort-by=.metadata.creationTimestamp \
         --output jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
     [[ -n "${driver_pod}" ]] || sleep 2
@@ -63,10 +64,17 @@ run_id="$(date -u +%Y%m%dT%H%M%SZ)"
 artifact_dir="${SETUP_DIR}/artifacts/${run_id}"
 mkdir -p "${artifact_dir}"
 cp /tmp/wayang-k8s-driver.log "${artifact_dir}/driver.log"
+app_id="$(kubectl get pod "${driver_pod}" \
+    --namespace "${NAMESPACE}" \
+    --output jsonpath='{.metadata.labels.spark-app-selector}')"
+if [[ ! "${app_id}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf '%s\n' "The Spark application ID is missing or invalid: ${app_id}" >&2
+    exit 1
+fi
 event_log="$(kubectl exec \
     spark-event-log-reader \
     --namespace "${NAMESPACE}" \
-    -- sh -c 'ls -1t /var/spark-events | head -n 1')"
+    -- sh -c "ls -1 /var/spark-events/${app_id}* 2>/dev/null | head -n 1 | xargs basename")"
 if [[ -z "${event_log}" ]]; then
     printf '%s\n' "No Spark event log was written to the persistent volume." >&2
     exit 1
@@ -75,6 +83,13 @@ mkdir -p "${artifact_dir}/spark-events"
 kubectl cp \
     "${NAMESPACE}/spark-event-log-reader:/var/spark-events/${event_log}" \
     "${artifact_dir}/spark-events/${event_log}" >/dev/null
+"${SETUP_DIR}/bin/write-run-metadata.py" \
+    --output "${artifact_dir}/run-metadata.json" \
+    --namespace "${NAMESPACE}" \
+    --driver-pod "${driver_pod}" \
+    --submitter-job spark-join-submit \
+    --workload spark-join-smoke \
+    --minikube-profile "${PROFILE}"
 ln -sfn "${run_id}" "${SETUP_DIR}/artifacts/latest"
 
 printf '%s\n' "Spark Join smoke test passed."
