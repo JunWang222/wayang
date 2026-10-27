@@ -39,6 +39,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.stream.Stream;
 
@@ -104,7 +105,7 @@ class JavaTableSinkTest extends JavaExecutionOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { inputChannelInstance }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM \"" + TABLE_NAME + "\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM " + TABLE_NAME)) {
             rs.next();
             assertEquals(2, rs.getInt(1));
         }
@@ -139,7 +140,7 @@ class JavaTableSinkTest extends JavaExecutionOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { inputChannelInstance }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM \"" + TABLE_NAME + "\" ORDER BY \"id\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT * FROM " + TABLE_NAME + " ORDER BY id")) {
             rs.next();
             assertEquals(1, rs.getInt("id"));
             assertEquals("Alice", rs.getString("name"));
@@ -189,7 +190,7 @@ class JavaTableSinkTest extends JavaExecutionOperatorTestBase {
         evaluate(sink2, new ChannelInstance[] { input2 }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM \"" + TABLE_NAME + "\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM " + TABLE_NAME)) {
             rs.next();
             assertEquals(2, rs.getInt(1));
         }
@@ -226,7 +227,7 @@ class JavaTableSinkTest extends JavaExecutionOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { input }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM \"" + TABLE_NAME + "\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT * FROM " + TABLE_NAME)) {
             rs.next();
             assertEquals(2, rs.getInt("id"));
             assertEquals(30, rs.getInt("age"));
@@ -268,7 +269,7 @@ class JavaTableSinkTest extends JavaExecutionOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { input }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT \"name\" FROM \"" + TABLE_NAME + "\" WHERE \"id\" = 1")) {
+                ResultSet rs = stmt.executeQuery("SELECT name FROM " + TABLE_NAME + " WHERE id = 1")) {
             rs.next();
             assertEquals(null, rs.getString(1));
             assertTrue(rs.wasNull());
@@ -300,7 +301,7 @@ class JavaTableSinkTest extends JavaExecutionOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { input }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM \"" + TABLE_NAME + "\" WHERE \"id\" = 1")) {
+                ResultSet rs = stmt.executeQuery("SELECT * FROM " + TABLE_NAME + " WHERE id = 1")) {
             rs.next();
             assertTrue(rs.getBoolean("is_active"));
             assertEquals(5000.50, rs.getDouble("salary"), 0.001);
@@ -336,7 +337,7 @@ class JavaTableSinkTest extends JavaExecutionOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { input }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM \"" + TABLE_NAME + "\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT * FROM " + TABLE_NAME)) {
             rs.next();
 
             // values written through the Java sink are read back from the database unchanged
@@ -359,6 +360,211 @@ class JavaTableSinkTest extends JavaExecutionOperatorTestBase {
             assertEquals(Types.NUMERIC, md.getColumnType(decimalIdx), "BigDecimal -> NUMERIC");
             assertEquals(38, md.getPrecision(decimalIdx), "BigDecimal precision must be 38");
             assertEquals(18, md.getScale(decimalIdx), "BigDecimal scale must be 18");
+        }
+    }
+
+    @Test
+    void testHsqldbUnquotedTableAppendPreservesSemantics() throws Exception {
+        String hsqldbUrl = "jdbc:hsqldb:mem:test_hsqldb_append;shutdown=false";
+        String hsqldbDriver = "org.hsqldb.jdbc.JDBCDriver";
+        Class.forName(hsqldbDriver);
+
+        try (Connection conn = DriverManager.getConnection(hsqldbUrl, "SA", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("DROP TABLE IF EXISTS target_append;");
+            // Standard SQL unquoted identifier: HSQLDB stores this as uppercase TARGET_APPEND
+            stmt.execute("CREATE TABLE target_append (id INT, name VARCHAR(50));");
+            stmt.execute("INSERT INTO target_append VALUES (1, 'Existing');");
+        }
+
+        Configuration configuration = new Configuration();
+        Properties dbProps = new Properties();
+        dbProps.setProperty("url", hsqldbUrl);
+        dbProps.setProperty("user", "SA");
+        dbProps.setProperty("password", "");
+        dbProps.setProperty("driver", hsqldbDriver);
+
+        // Target table name specified unquoted as 'target_append'
+        JavaTableSink<Record> sink = new JavaTableSink<>(dbProps, "append", "target_append",
+                new String[]{"id", "name"}, DataSetType.createDefault(Record.class));
+
+        Job job = mock(Job.class);
+        when(job.getConfiguration()).thenReturn(configuration);
+        final JavaExecutor javaExecutor = (JavaExecutor) JavaPlatform.getInstance().createExecutor(job);
+
+        StreamChannel.Instance input = (StreamChannel.Instance) StreamChannel.DESCRIPTOR
+                .createChannel(mock(OutputSlot.class), configuration)
+                .createInstance(javaExecutor, mock(OptimizationContext.OperatorContext.class), 0);
+
+        input.accept(Stream.of(new Record(10, "Ten"), new Record(20, "Twenty")));
+        evaluate(sink, new ChannelInstance[]{input}, new ChannelInstance[0]);
+
+        // Verify data via unquoted identifier lookup: pre-existing row preserved, new rows appended
+        try (Connection conn = DriverManager.getConnection(hsqldbUrl, "SA", "");
+             Statement stmt = conn.createStatement()) {
+            ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM target_append;");
+            rs.next();
+            assertEquals(3, rs.getInt(1), "Append must preserve existing row and insert new rows");
+
+            rs = stmt.executeQuery("SELECT name FROM target_append WHERE id = 1;");
+            rs.next();
+            assertEquals("Existing", rs.getString(1));
+
+            rs = stmt.executeQuery("SELECT COUNT(*) FROM target_append WHERE id >= 10;");
+            rs.next();
+            assertEquals(2, rs.getInt(1));
+
+            stmt.execute("DROP TABLE IF EXISTS target_append;");
+        }
+    }
+
+    @Test
+    void testHsqldbUnquotedTableOverwriteReplacesSemantics() throws Exception {
+        String hsqldbUrl = "jdbc:hsqldb:mem:test_hsqldb_overwrite;shutdown=false";
+        String hsqldbDriver = "org.hsqldb.jdbc.JDBCDriver";
+        Class.forName(hsqldbDriver);
+
+        try (Connection conn = DriverManager.getConnection(hsqldbUrl, "SA", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("DROP TABLE IF EXISTS target_append;");
+            // Standard SQL unquoted identifier: HSQLDB stores this as uppercase TARGET_APPEND
+            stmt.execute("CREATE TABLE target_append (id INT, name VARCHAR(50));");
+            stmt.execute("INSERT INTO target_append VALUES (1, 'OldRecord');");
+        }
+
+        Configuration configuration = new Configuration();
+        Properties dbProps = new Properties();
+        dbProps.setProperty("url", hsqldbUrl);
+        dbProps.setProperty("user", "SA");
+        dbProps.setProperty("password", "");
+        dbProps.setProperty("driver", hsqldbDriver);
+
+        // Overwrite mode on unquoted 'target_append'
+        JavaTableSink<Record> sink = new JavaTableSink<>(dbProps, "overwrite", "target_append",
+                new String[]{"id", "name"}, DataSetType.createDefault(Record.class));
+
+        Job job = mock(Job.class);
+        when(job.getConfiguration()).thenReturn(configuration);
+        final JavaExecutor javaExecutor = (JavaExecutor) JavaPlatform.getInstance().createExecutor(job);
+
+        StreamChannel.Instance input = (StreamChannel.Instance) StreamChannel.DESCRIPTOR
+                .createChannel(mock(OutputSlot.class), configuration)
+                .createInstance(javaExecutor, mock(OptimizationContext.OperatorContext.class), 0);
+
+        input.accept(Stream.of(new Record(10, "NewRecord")));
+        evaluate(sink, new ChannelInstance[]{input}, new ChannelInstance[0]);
+
+        // Verify data via unquoted lookup: original row was replaced, not left untouched
+        try (Connection conn = DriverManager.getConnection(hsqldbUrl, "SA", "");
+             Statement stmt = conn.createStatement()) {
+            ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM target_append;");
+            rs.next();
+            assertEquals(1, rs.getInt(1), "Overwrite must replace the original table");
+
+            rs = stmt.executeQuery("SELECT name FROM target_append WHERE id = 10;");
+            rs.next();
+            assertEquals("NewRecord", rs.getString(1));
+
+            rs = stmt.executeQuery("SELECT COUNT(*) FROM target_append WHERE id = 1;");
+            rs.next();
+            assertEquals(0, rs.getInt(1), "Pre-existing rows must not remain after overwrite");
+
+            stmt.execute("DROP TABLE IF EXISTS target_append;");
+        }
+    }
+
+    @Test
+    void testHsqldbAlreadyQuotedTablePreservesCase() throws Exception {
+        String hsqldbUrl = "jdbc:hsqldb:mem:test_hsqldb_quoted;shutdown=false";
+        String hsqldbDriver = "org.hsqldb.jdbc.JDBCDriver";
+        Class.forName(hsqldbDriver);
+
+        try (Connection conn = DriverManager.getConnection(hsqldbUrl, "SA", "");
+             Statement stmt = conn.createStatement()) {
+            stmt.execute("DROP TABLE IF EXISTS \"my_exact_table\";");
+            stmt.execute("CREATE TABLE \"my_exact_table\" (id INT, name VARCHAR(50));");
+        }
+
+        Configuration configuration = new Configuration();
+        Properties dbProps = new Properties();
+        dbProps.setProperty("url", hsqldbUrl);
+        dbProps.setProperty("user", "SA");
+        dbProps.setProperty("password", "");
+        dbProps.setProperty("driver", hsqldbDriver);
+
+        // Explicitly double-quoted table name must preserve exact lowercase
+        JavaTableSink<Record> sink = new JavaTableSink<>(dbProps, "append", "\"my_exact_table\"",
+                new String[]{"id", "name"}, DataSetType.createDefault(Record.class));
+
+        Job job = mock(Job.class);
+        when(job.getConfiguration()).thenReturn(configuration);
+        final JavaExecutor javaExecutor = (JavaExecutor) JavaPlatform.getInstance().createExecutor(job);
+
+        StreamChannel.Instance input = (StreamChannel.Instance) StreamChannel.DESCRIPTOR
+                .createChannel(mock(OutputSlot.class), configuration)
+                .createInstance(javaExecutor, mock(OptimizationContext.OperatorContext.class), 0);
+
+        input.accept(Stream.of(new Record(1, "QuotedRow")));
+        evaluate(sink, new ChannelInstance[]{input}, new ChannelInstance[0]);
+
+        try (Connection conn = DriverManager.getConnection(hsqldbUrl, "SA", "");
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM \"my_exact_table\";")) {
+            rs.next();
+            assertEquals(1, rs.getInt(1));
+
+            stmt.execute("DROP TABLE IF EXISTS \"my_exact_table\";");
+        }
+    }
+
+    @Test
+    void testHsqldbAppendUnderTurkishLocale() throws Exception {
+        Locale defaultLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            String hsqldbUrl = "jdbc:hsqldb:mem:test_hsqldb_turkish;shutdown=false";
+            String hsqldbDriver = "org.hsqldb.jdbc.JDBCDriver";
+            Class.forName(hsqldbDriver);
+
+            try (Connection conn = DriverManager.getConnection(hsqldbUrl, "SA", "");
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute("DROP TABLE IF EXISTS target_append;");
+                stmt.execute("CREATE TABLE target_append (id INT, name VARCHAR(50));");
+                stmt.execute("INSERT INTO target_append VALUES (1, 'Existing');");
+            }
+
+            Configuration configuration = new Configuration();
+            Properties dbProps = new Properties();
+            dbProps.setProperty("url", hsqldbUrl);
+            dbProps.setProperty("user", "SA");
+            dbProps.setProperty("password", "");
+            dbProps.setProperty("driver", hsqldbDriver);
+
+            JavaTableSink<Record> sink = new JavaTableSink<>(dbProps, "append", "target_append",
+                    new String[]{"id", "name"}, DataSetType.createDefault(Record.class));
+
+            Job job = mock(Job.class);
+            when(job.getConfiguration()).thenReturn(configuration);
+            final JavaExecutor javaExecutor = (JavaExecutor) JavaPlatform.getInstance().createExecutor(job);
+
+            StreamChannel.Instance input = (StreamChannel.Instance) StreamChannel.DESCRIPTOR
+                    .createChannel(mock(OutputSlot.class), configuration)
+                    .createInstance(javaExecutor, mock(OptimizationContext.OperatorContext.class), 0);
+
+            input.accept(Stream.of(new Record(2, "TurkishAppended")));
+            evaluate(sink, new ChannelInstance[]{input}, new ChannelInstance[0]);
+
+            try (Connection conn = DriverManager.getConnection(hsqldbUrl, "SA", "");
+                 Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM target_append;")) {
+                rs.next();
+                assertEquals(2, rs.getInt(1), "Append must succeed under Turkish locale");
+
+                stmt.execute("DROP TABLE IF EXISTS target_append;");
+            }
+        } finally {
+            Locale.setDefault(defaultLocale);
         }
     }
 

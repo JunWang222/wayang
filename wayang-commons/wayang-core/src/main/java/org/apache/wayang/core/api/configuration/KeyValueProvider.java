@@ -46,7 +46,7 @@ public abstract class KeyValueProvider<Key, Value> {
     private String warningSlf4jFormat;
 
     protected KeyValueProvider(KeyValueProvider<Key, Value> parent) {
-        this(parent, parent.configuration);
+        this(parent, parent != null ? parent.configuration : null);
     }
 
     protected KeyValueProvider(KeyValueProvider<Key, Value> parent, Configuration configuration) {
@@ -106,6 +106,28 @@ public abstract class KeyValueProvider<Key, Value> {
     }
 
     /**
+     * Checks if this provider explicitly defines the value for the given key (as opposed to caching
+     * an inherited parent value or falling back).
+     *
+     * @param key the key
+     * @return {@code true} if this provider explicitly defines the key
+     */
+    public boolean isExplicitLocally(Key key) {
+        return false;
+    }
+
+    /**
+     * Provide the value associated to the given key only if it was explicitly defined on this very instance,
+     * ignoring any cached inherited values.
+     *
+     * @param key the key
+     * @return the value or {@code null} if this instance does not explicitly associate a value with the key
+     */
+    public Value provideExplicitLocally(Key key) {
+        return this.isExplicitLocally(key) ? this.provideLocally(key) : null;
+    }
+
+    /**
      * React to a value that has been delivered by a {@link #parent}. Does nothing be default.
      *
      * @param key   the key of the entry
@@ -132,6 +154,10 @@ public abstract class KeyValueProvider<Key, Value> {
 
     public void set(Key key, Value value) {
         throw new WayangException(String.format("Setting values not supported for %s.", this.getClass().getSimpleName()));
+    }
+
+    public void remove(Key key) {
+        throw new WayangException(String.format("Removing values not supported for %s.", this.getClass().getSimpleName()));
     }
 
     public Configuration getConfiguration() {

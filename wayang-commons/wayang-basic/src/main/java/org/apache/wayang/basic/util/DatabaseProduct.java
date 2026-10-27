@@ -30,5 +30,7 @@ public enum DatabaseProduct {
     H2,
     DERBY,
     MSSQL,
+    HSQLDB,
+    BIGQUERY,
     UNKNOWN
 }

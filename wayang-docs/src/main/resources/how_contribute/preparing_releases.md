@@ -148,7 +148,7 @@ What the plugin now does, is automatically execute the following operations:
 
 However, this just prepared the git repository for the release, we have to perform the release to produce and stage the release artifacts.
 
-Please verify the git repository at: `https://gitbox.apache.org/repos/asf?p=incubator-wayang.git` is in the correct state. Please select the release branch and verify the commit log. It is important that the commit with the message "[maven-release-plugin] prepare release `v{release-version}`" is tagged with the release tag (in this case `v0.6.0`)
+Please verify the git repository at: `https://gitbox.apache.org/repos/asf?p=wayang.git` is in the correct state. Please select the release branch and verify the commit log. It is important that the commit with the message "[maven-release-plugin] prepare release `v{release-version}`" is tagged with the release tag (in this case `v0.6.0`)
 
 # What if something goes wrong?
 
@@ -249,14 +249,14 @@ For this we usually send two emails. The following would be the one used to do o
 E-Mail Topic:
 <div style="border: 1px solid gray; padding: 1em;">
 <pre>
-[VOTE] Apache Wayang (incubating) 0.6.0 RC1
+[VOTE] Apache Wayang 1.X.X RC1
 </pre>
 </div>
 
 Message:
 <div style="border: 1px solid gray; padding: 1em;">
 <pre>
-Apache Wayang (incubating) 0.6.0 has been staged under [2] and it’s time to vote on accepting it for release. All Maven artifacts are available under [1].
+Apache Wayang 1.X.X has been staged under [2] and it’s time to vote on accepting it for release. All Maven artifacts are available under [1].
 Voting will be open for 72hr. A minimum of 3 binding +1 votes and more binding +1 than binding -1
 are required to pass.
 
@@ -288,7 +288,7 @@ As it is sometimes to do the vote counting, if voting and discussions are going 
 
 E-Mail Topic:
 <div style="border: 1px solid gray; padding: 1em;">
-<pre>[DISCUSS] Apache Wayang (incubating) 0.6.0 RC1</pre>
+<pre>[DISCUSS] Apache Wayang 1.X.X RC1</pre>
 </div>
 
 
@@ -312,9 +312,9 @@ Now we have to wait 72 hours till we can announce the result of the vote. The vo
 As soon as the votes are finished, and the results were in favor of a release, the staged artifacts can be released. This is done by moving them inside the Apache SVN.
 
 ```shell
-svn move -m "Release Apache Wayang (incubating) 0.6.0" \
-  https://dist.apache.org/repos/dist/dev/wayang/0.6.0/rc1 \
-  https://dist.apache.org/repos/dist/release/wayang/0.6.0
+svn move -m "Release Apache Wayang 1.X.X" \
+  https://dist.apache.org/repos/dist/dev/wayang/1.X.X/rc1 \
+  https://dist.apache.org/repos/dist/release/wayang/1.X.X
 ```
 
 This will make the release artifacts available and will trigger them being copied to mirror sites.

@@ -48,6 +48,7 @@
         <module>wayang-trino</module>
         <module>wayang-duckdb</module>
         <module>wayang-tensorflow</module>
+        <module>wayang-semantic</module>
     </modules>
 
     <dependencyManagement>

@@ -21,8 +21,10 @@ package org.apache.wayang.core.api.configuration;
 import org.apache.wayang.core.api.Configuration;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Implementation of {@link KeyValueProvider} that uses a {@link Map} to provide a value.
@@ -30,6 +32,8 @@ import java.util.Objects;
 public class MapBasedKeyValueProvider<Key, Value> extends KeyValueProvider<Key, Value> {
 
     private final Map<Key, Value> storedValues = new HashMap<>();
+
+    private final Set<Key> explicitKeys = new HashSet<>();
 
     private final boolean isCaching;
 
@@ -94,6 +98,18 @@ public class MapBasedKeyValueProvider<Key, Value> extends KeyValueProvider<Key, 
     public void set(Key key, Value value) {
         Objects.requireNonNull(key);
         this.storedValues.put(key, value);
+        this.explicitKeys.add(key);
     }
 
+    @Override
+    public boolean isExplicitLocally(Key key) {
+        return this.explicitKeys.contains(key);
+    }
+
+    @Override
+    public void remove(Key key) {
+        Objects.requireNonNull(key);
+        this.storedValues.remove(key);
+        this.explicitKeys.remove(key);
+    }
 }

@@ -63,7 +63,7 @@ class SparkTableSinkTest extends SparkOperatorTestBase {
     void teardownTest() throws Exception {
         if (connection != null && !connection.isClosed()) {
             try (Statement stmt = connection.createStatement()) {
-                stmt.execute("DROP TABLE IF EXISTS \"" + TABLE_NAME + "\"");
+                stmt.execute("DROP TABLE IF EXISTS " + TABLE_NAME);
             }
             connection.close();
         }
@@ -90,7 +90,7 @@ class SparkTableSinkTest extends SparkOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { inputChannelInstance }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM \"" + TABLE_NAME + "\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM " + TABLE_NAME)) {
             rs.next();
             assertEquals(2, rs.getInt(1));
         }
@@ -117,7 +117,7 @@ class SparkTableSinkTest extends SparkOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { inputChannelInstance }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM \"" + TABLE_NAME + "\" ORDER BY \"id\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT * FROM " + TABLE_NAME + " ORDER BY \"id\"")) {
             rs.next();
             assertEquals(1, rs.getInt("id"));
             assertEquals("Alice", rs.getString("name"));
@@ -152,7 +152,7 @@ class SparkTableSinkTest extends SparkOperatorTestBase {
         evaluate(sink2, new ChannelInstance[] { input2 }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM \"" + TABLE_NAME + "\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM " + TABLE_NAME)) {
             rs.next();
             assertEquals(2, rs.getInt(1));
         }
@@ -181,7 +181,7 @@ class SparkTableSinkTest extends SparkOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { input }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM \"" + TABLE_NAME + "\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT * FROM " + TABLE_NAME)) {
             rs.next();
             assertEquals(2, rs.getInt("id"));
             assertEquals(30, rs.getInt("age"));
@@ -214,7 +214,7 @@ class SparkTableSinkTest extends SparkOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { input }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT \"name\" FROM \"" + TABLE_NAME + "\" WHERE \"id\" = 1")) {
+                ResultSet rs = stmt.executeQuery("SELECT \"name\" FROM " + TABLE_NAME + " WHERE \"id\" = 1")) {
             rs.next();
             assertEquals(null, rs.getString(1));
             assertTrue(rs.wasNull());
@@ -237,7 +237,7 @@ class SparkTableSinkTest extends SparkOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { input }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM \"" + TABLE_NAME + "\" WHERE \"id\" = 1")) {
+                ResultSet rs = stmt.executeQuery("SELECT * FROM " + TABLE_NAME + " WHERE \"id\" = 1")) {
             rs.next();
             assertTrue(rs.getBoolean("is_active"));
             assertEquals(5000.50, rs.getDouble("salary"), 0.001);
@@ -275,7 +275,7 @@ class SparkTableSinkTest extends SparkOperatorTestBase {
         evaluate(sink, new ChannelInstance[] { input }, new ChannelInstance[0]);
 
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery("SELECT * FROM \"" + TABLE_NAME + "\"")) {
+                ResultSet rs = stmt.executeQuery("SELECT * FROM " + TABLE_NAME)) {
             rs.next();
 
             // values written through Spark are read back from the database unchanged
