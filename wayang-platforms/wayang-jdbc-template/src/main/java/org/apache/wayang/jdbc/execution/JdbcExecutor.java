@@ -149,16 +149,24 @@ public class JdbcExecutor extends ExecutorTemplate {
 
     /**
      * Creates a query channel and the SQL statement.
+     *
+     * @param stage the JDBC execution stage
+     * @param context provides optimization information and the Wayang configuration
+     * @param jdbcExecutor the executor with the database connection
+     * @return a tuple containing the SQL statement and its output channel
      */
     protected static Tuple2<String, SqlQueryChannel.Instance> createSqlQuery(final ExecutionStage stage,
                                                                              final OptimizationContext context,
                                                                              final JdbcExecutor jdbcExecutor) {
         final Collection<?> startTasks = stage.getStartTasks();
         JdbcExecutor.prepareSourceTasks(startTasks, jdbcExecutor, context.getConfiguration());
+
+        // Verify that we can handle this instance.
         final ExecutionTask startTask = JdbcExecutor.selectStartTask(startTasks, stage, context.getConfiguration());
         assert startTask.getOperator() instanceof JdbcSourceOperator
                 : "Invalid JDBC stage: Start task has to be a JDBC source";
 
+        // Extract the different types of ExecutionOperators from the stage.
         final JdbcSourceOperator sourceOp = (JdbcSourceOperator) startTask.getOperator();
         SqlQueryChannel.Instance tipChannelInstance = JdbcExecutor.instantiateOutboundChannel(startTask, context,
                 jdbcExecutor);
@@ -172,20 +180,21 @@ public class JdbcExecutor extends ExecutorTemplate {
         assert allTasks.size() <= 3;
         ExecutionTask nextTask = JdbcExecutor.findJdbcExecutionOperatorTaskInStage(startTask, stage);
         while (nextTask != null) {
+            // Evaluate the nextTask.
             final ExecutionOperator operator = nextTask.getOperator();
             if (operator instanceof FilterOperator || operator instanceof SpatialFilterOperator) {
                 filterTasks.add((JdbcExecutionOperator) operator);
             } else if (operator instanceof JdbcProjectionOperator) {
-                assert projectionTask == null;
+                assert projectionTask == null; // Allow one projection operator per stage for now.
                 projectionTask = (JdbcProjectionOperator) operator;
             } else if (operator instanceof final JdbcGlobalReduceOperator globalReduce) {
-                assert globalReduceTask == null;
+                assert globalReduceTask == null; // Allow one global reduce operator per stage for now.
                 globalReduceTask = globalReduce;
             } else if (operator instanceof final JdbcReduceByOperator reduceBy) {
-                assert reduceByTask == null;
+                assert reduceByTask == null; // Allow one reduce-by operator per stage for now.
                 reduceByTask = reduceBy;
             } else if (operator instanceof final JdbcSortOperator sort) {
-                assert sortTask == null;
+                assert sortTask == null; // Allow one sort operator per stage for now.
                 sortTask = sort;
             } else if (operator instanceof JoinOperator || operator instanceof SpatialJoinOperator) {
                 joinTasks.add((JdbcExecutionOperator) operator);
@@ -193,11 +202,15 @@ public class JdbcExecutor extends ExecutorTemplate {
                 throw new WayangException(String.format("Unsupported JDBC execution task %s", nextTask));
             }
 
+            // Move the tipChannelInstance.
             tipChannelInstance = JdbcExecutor.instantiateOutboundChannel(nextTask, context, tipChannelInstance,
                     jdbcExecutor);
+
+            // Go to the next nextTask.
             nextTask = JdbcExecutor.findJdbcExecutionOperatorTaskInStage(nextTask, stage);
         }
 
+        // Create the SQL query.
         final StringBuilder query = createSqlString(jdbcExecutor, sourceOp, filterTasks, projectionTask,
                 globalReduceTask, reduceByTask, sortTask, joinTasks, context.getConfiguration());
         return new Tuple2<>(query.toString(), tipChannelInstance);
@@ -252,6 +265,12 @@ public class JdbcExecutor extends ExecutorTemplate {
 
     /**
      * Handles execution stages that end with a {@link JdbcTableSinkOperator}.
+     * Composes a SQL query from the stage's operators and executes it directly on
+     * the database connection, keeping all data within the database.
+     *
+     * @param stage the execution stage ending with a sink
+     * @param optimizationContext provides optimization information
+     * @param jdbcExecutor the executor with the database connection
      */
     private static long executeSinkStage(final ExecutionStage stage, final OptimizationContext optimizationContext,
             final JdbcExecutor jdbcExecutor) {
