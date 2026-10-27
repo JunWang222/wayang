@@ -27,6 +27,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -80,7 +81,7 @@ public class SqlTypeUtils {
     public static DatabaseProduct detectProduct(String url) {
         if (url == null)
             return DatabaseProduct.UNKNOWN;
-        String lowerUrl = url.toLowerCase();
+        String lowerUrl = url.toLowerCase(Locale.ROOT);
         if (lowerUrl.contains("postgresql") || lowerUrl.contains("postgres"))
             return DatabaseProduct.POSTGRESQL;
         if (lowerUrl.contains("mysql"))
@@ -90,12 +91,16 @@ public class SqlTypeUtils {
         if (lowerUrl.contains("sqlite")) {
             return DatabaseProduct.SQLITE;
         }
+        if (lowerUrl.contains("hsqldb"))
+            return DatabaseProduct.HSQLDB;
         if (lowerUrl.contains("h2"))
             return DatabaseProduct.H2;
         if (lowerUrl.contains("derby"))
             return DatabaseProduct.DERBY;
         if (lowerUrl.contains("mssql") || lowerUrl.contains("sqlserver"))
             return DatabaseProduct.MSSQL;
+        if (lowerUrl.contains("bigquery"))
+            return DatabaseProduct.BIGQUERY;
         return DatabaseProduct.UNKNOWN;
     }
 

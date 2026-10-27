@@ -22,6 +22,7 @@ import org.apache.wayang.basic.data.Record;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -43,7 +44,27 @@ public class SqlTypeUtilsTest {
                 SqlTypeUtils.detectProduct("jdbc:derby:memory:test;create=true"));
         assertEquals(DatabaseProduct.MSSQL,
                 SqlTypeUtils.detectProduct("jdbc:sqlserver://localhost:1433;databaseName=db"));
+        assertEquals(DatabaseProduct.HSQLDB,
+                SqlTypeUtils.detectProduct("jdbc:hsqldb:mem:test"));
+        assertEquals(DatabaseProduct.BIGQUERY,
+                SqlTypeUtils.detectProduct("jdbc:bigquery://https://www.googleapis.com/bigquery/v2:443"));
         assertEquals(DatabaseProduct.UNKNOWN, SqlTypeUtils.detectProduct("jdbc:unknown:db"));
+    }
+
+    @Test
+    public void testDetectProductTurkishLocale() {
+        Locale defaultLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            assertEquals(DatabaseProduct.POSTGRESQL,
+                    SqlTypeUtils.detectProduct("JDBC:POSTGRESQL://localhost:5432/db"));
+            assertEquals(DatabaseProduct.SQLITE,
+                    SqlTypeUtils.detectProduct("JDBC:SQLITE:test.db"));
+            assertEquals(DatabaseProduct.BIGQUERY,
+                    SqlTypeUtils.detectProduct("JDBC:BIGQUERY://https://www.googleapis.com/bigquery/v2:443"));
+        } finally {
+            Locale.setDefault(defaultLocale);
+        }
     }
 
     @Test

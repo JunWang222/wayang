@@ -18,6 +18,7 @@
 
 package org.apache.wayang.ml;
 
+import java.io.InputStream;
 import java.util.Collection;
 import java.util.Collections;
 
@@ -26,13 +27,17 @@ import org.apache.wayang.core.mapping.Mapping;
 import org.apache.wayang.core.optimizer.channels.ChannelConversion;
 import org.apache.wayang.core.platform.Platform;
 import org.apache.wayang.core.plugin.Plugin;
+import org.apache.wayang.core.util.ReflectionUtils;
 import org.apache.wayang.java.platform.JavaPlatform;
+import org.apache.wayang.ml.encoding.TreeEncoder;
 import org.apache.wayang.spark.platform.SparkPlatform;
 
 /**
  * Provides {@link Plugin}s that enable usage of the xxxx.
  */
 public class MachineLearning {
+
+    private static final String DEFAULT_CONFIG_FILE = "wayang-ml-defaults.properties";
 
     /**
      * Enables use with the {@link JavaPlatform} and {@link SparkPlatform}.
@@ -56,8 +61,41 @@ public class MachineLearning {
 
         @Override
         public void setProperties(final Configuration configuration) {
+            try (final InputStream is = ReflectionUtils.loadResource(DEFAULT_CONFIG_FILE)) {
+                if (is != null) {
+                    final java.util.Properties properties = new java.util.Properties();
+                    properties.load(is);
+                    for (final java.util.Map.Entry<Object, Object> propertyEntry : properties.entrySet()) {
+                        final String key = propertyEntry.getKey().toString();
+                        final String value = propertyEntry.getValue().toString();
+                        if (isConfigured(configuration, key)) {
+                            continue;
+                        }
+                        configuration.setProperty(key, value);
+                    }
+                }
+            } catch (java.io.IOException e) {
+                throw new org.apache.wayang.core.api.exception.WayangException("Could not load ML default configuration.", e);
+            }
         }
     };
+
+    private static boolean isConfigured(final Configuration configuration, final String key) {
+        if (TreeEncoder.ENCODE_IDS_PROPERTY.equals(key) || TreeEncoder.ENCODE_IDS_SHORTHAND_PROPERTY.equals(key)) {
+            return isExplicitlyConfigured(configuration, TreeEncoder.ENCODE_IDS_PROPERTY)
+                    || isExplicitlyConfigured(configuration, TreeEncoder.ENCODE_IDS_SHORTHAND_PROPERTY);
+        }
+        return isExplicitlyConfigured(configuration, key);
+    }
+
+    private static boolean isExplicitlyConfigured(final Configuration configuration, final String key) {
+        for (Configuration current = configuration; current != null; current = current.getParent()) {
+            if (current.getProperties() != null && current.getProperties().provideExplicitLocally(key) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * Retrieve a {@link Plugin} to use xxx on the

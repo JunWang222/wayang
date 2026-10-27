@@ -329,7 +329,7 @@ public class JdbcExecutor extends ExecutorTemplate {
 
         try (Statement stmt = jdbcExecutor.connection.createStatement()) {
             if ("overwrite".equals(sinkOp.getMode())) {
-                stmt.execute("DROP TABLE IF EXISTS " + sinkOp.getTableName());
+                stmt.execute("DROP TABLE IF EXISTS " + sinkOp.getQuotedTableName(jdbcExecutor.connection));
             }
             final String fullSql = sinkClause + " " + selectSql + sinkOp.createSqlSuffix();
             final long startTime = System.currentTimeMillis();
@@ -374,19 +374,19 @@ public class JdbcExecutor extends ExecutorTemplate {
      * unless it is not comprising a {@link JdbcExecutionOperator} and/or not in the
      * given {@link ExecutionStage}.
      *
-     * @param task  whose follow-up {@link ExecutionTask} is requested; should have
-     *              a single follower
+     * @param task  whose follow-up {@link ExecutionTask} is requested
      * @param stage in which the follow-up {@link ExecutionTask} should be
      * @return the said follow-up {@link ExecutionTask} or {@code null} if none
      */
     private static ExecutionTask findJdbcExecutionOperatorTaskInStage(final ExecutionTask task,
                                                                       final ExecutionStage stage) {
-        assert task.getNumOuputChannels() == 1;
-        final Channel outputChannel = task.getOutputChannel(0);
-        if (outputChannel.getConsumers().size() != 1) {
+        if (task.getNumOuputChannels() != 1) {
             return null;
         }
-
+        final Channel outputChannel = task.getOutputChannel(0);
+        if (outputChannel == null || outputChannel.getConsumers().size() != 1) {
+            return null;
+        }
         final ExecutionTask consumer = outputChannel.getConsumers().iterator().next();
         return consumer.getStage() == stage && consumer.getOperator() instanceof JdbcExecutionOperator
                 ? consumer
