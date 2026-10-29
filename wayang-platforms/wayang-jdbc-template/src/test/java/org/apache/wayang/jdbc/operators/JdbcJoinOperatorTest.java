@@ -137,6 +137,10 @@ class JdbcJoinOperatorTest extends OperatorTestBase {
     @Test
     void testWithHsqldb() throws SQLException {
         Configuration configuration = new Configuration();
+        configuration.setProperty(
+                "wayang.hsqldb.parquetsource.mappings",
+                "testA=wrongParquetRelationA;testB=wrongParquetRelationB"
+        );
 
         Job job = mock(Job.class);
         when(job.getConfiguration()).thenReturn(configuration);

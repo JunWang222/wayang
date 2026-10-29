@@ -57,6 +57,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -74,7 +76,7 @@ public class JdbcExecutor extends ExecutorTemplate {
                                                 final JdbcSortOperator sortTask,
                                                 final Collection<JdbcExecutionOperator> joinTasks) {
         return createSqlString(jdbcExecutor, sourceOp, filterTasks, projectionTask, globalReduceTask,
-                reduceByTask, sortTask, joinTasks, null);
+                reduceByTask, sortTask, joinTasks, null, Map.of());
     }
 
     public static StringBuilder createSqlString(final JdbcExecutor jdbcExecutor,
@@ -86,6 +88,24 @@ public class JdbcExecutor extends ExecutorTemplate {
                                                 final JdbcSortOperator sortTask,
                                                 final Collection<JdbcExecutionOperator> joinTasks,
                                                 final Configuration configuration) {
+        final Map<String, String> sourceNames = Map.of(
+                sourceOp.getSourceName(),
+                sourceOp.getSourceName(configuration)
+        );
+        return createSqlString(jdbcExecutor, sourceOp, filterTasks, projectionTask, globalReduceTask,
+                reduceByTask, sortTask, joinTasks, configuration, sourceNames);
+    }
+
+    private static StringBuilder createSqlString(final JdbcExecutor jdbcExecutor,
+                                                 final JdbcSourceOperator sourceOp,
+                                                 final Collection<JdbcExecutionOperator> filterTasks,
+                                                 final JdbcProjectionOperator projectionTask,
+                                                 final JdbcGlobalReduceOperator globalReduceTask,
+                                                 final JdbcReduceByOperator reduceByTask,
+                                                 final JdbcSortOperator sortTask,
+                                                 final Collection<JdbcExecutionOperator> joinTasks,
+                                                 final Configuration configuration,
+                                                 final Map<String, String> sourceNames) {
         final String sourceName = sourceOp.createSqlClause(
                 jdbcExecutor.connection,
                 jdbcExecutor.functionCompiler,
@@ -95,7 +115,13 @@ public class JdbcExecutor extends ExecutorTemplate {
                 .map(op -> op.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler, configuration))
                 .collect(Collectors.toList());
         final Collection<String> joins = joinTasks.stream()
-                .map(op -> op.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler, configuration))
+                .map(op -> op instanceof JdbcJoinOperator
+                        ? ((JdbcJoinOperator<?>) op).createSqlClause(
+                                jdbcExecutor.connection,
+                                jdbcExecutor.functionCompiler,
+                                sourceNames
+                        )
+                        : op.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler, configuration))
                 .collect(Collectors.toList());
 
         final String selectClause;
@@ -212,7 +238,8 @@ public class JdbcExecutor extends ExecutorTemplate {
 
         // Create the SQL query.
         final StringBuilder query = createSqlString(jdbcExecutor, sourceOp, filterTasks, projectionTask,
-                globalReduceTask, reduceByTask, sortTask, joinTasks, context.getConfiguration());
+                globalReduceTask, reduceByTask, sortTask, joinTasks, context.getConfiguration(),
+                resolveSourceNames(startTasks, context.getConfiguration()));
         return new Tuple2<>(query.toString(), tipChannelInstance);
     }
 
@@ -261,6 +288,22 @@ public class JdbcExecutor extends ExecutorTemplate {
                 );
             }
         }
+    }
+
+    private static Map<String, String> resolveSourceNames(final Collection<?> startTasks,
+                                                          final Configuration configuration) {
+        final Map<String, String> sourceNames = new HashMap<>();
+        for (Object startTaskObject : startTasks) {
+            final ExecutionTask startTask = (ExecutionTask) startTaskObject;
+            if (startTask.getOperator() instanceof JdbcSourceOperator) {
+                final JdbcSourceOperator sourceOperator = (JdbcSourceOperator) startTask.getOperator();
+                sourceNames.put(
+                        sourceOperator.getSourceName(),
+                        sourceOperator.getSourceName(configuration)
+                );
+            }
+        }
+        return sourceNames;
     }
 
     /**
@@ -324,7 +367,8 @@ public class JdbcExecutor extends ExecutorTemplate {
         }
 
         final String selectSql = createSqlString(jdbcExecutor, sourceOp, filterTasks, projectionTask,
-                globalReduceTask, reduceByTask, sortTask, joinTasks, optimizationContext.getConfiguration()).toString();
+                globalReduceTask, reduceByTask, sortTask, joinTasks, optimizationContext.getConfiguration(),
+                resolveSourceNames(startTasks, optimizationContext.getConfiguration())).toString();
         final String sinkClause = sinkOp.createSqlClause(jdbcExecutor.connection, jdbcExecutor.functionCompiler);
 
         try (Statement stmt = jdbcExecutor.connection.createStatement()) {
