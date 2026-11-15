@@ -12,6 +12,8 @@ REPOSITORY_ROOT="$(cd "${SETUP_DIR}/.." && pwd)"
 NAMESPACE="wayang-profiling"
 PROFILE="${WAYANG_MINIKUBE_PROFILE:-wayang-profiling}"
 DUCKDB_IMAGE="${WAYANG_DUCKDB_IMAGE:-wayang/duckdb-kubernetes-smoke:1.5.5.1}"
+PRESTO_IMAGE="${WAYANG_PRESTO_IMAGE:-prestodb/presto:0.299}"
+PRESTO_CLIENT_IMAGE="${WAYANG_PRESTO_CLIENT_IMAGE:-wayang/presto-kubernetes-smoke:1.5.5.1}"
 
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then

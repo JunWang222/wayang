@@ -1,0 +1,140 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: presto-config
+  namespace: wayang-profiling
+data:
+  coordinator.properties: |
+    coordinator=true
+    node-scheduler.include-coordinator=false
+    http-server.http.port=8080
+    query.max-memory=512MB
+    query.max-memory-per-node=256MB
+    discovery-server.enabled=true
+    discovery.uri=http://presto:8080
+  worker.properties: |
+    coordinator=false
+    http-server.http.port=8080
+    query.max-memory=512MB
+    query.max-memory-per-node=256MB
+    discovery.uri=http://presto:8080
+  memory.properties: |
+    connector.name=memory
+    memory.max-data-per-node=256MB
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: presto
+  namespace: wayang-profiling
+spec:
+  selector:
+    app: presto
+    component: coordinator
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: presto-coordinator
+  namespace: wayang-profiling
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: presto
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: presto
+        component: coordinator
+    spec:
+      containers:
+        - name: presto
+          image: prestodb/presto:0.299
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /v1/info
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /opt/presto-server/etc/config.properties
+              subPath: coordinator.properties
+            - name: config
+              mountPath: /opt/presto-server/etc/catalog/memory.properties
+              subPath: memory.properties
+      volumes:
+        - name: config
+          configMap:
+            name: presto-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: presto-worker
+  namespace: wayang-profiling
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: presto
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: presto
+        component: worker
+    spec:
+      containers:
+        - name: presto
+          image: prestodb/presto:0.299
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /v1/info
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /opt/presto-server/etc/config.properties
+              subPath: worker.properties
+            - name: config
+              mountPath: /opt/presto-server/etc/catalog/memory.properties
+              subPath: memory.properties
+      volumes:
+        - name: config
+          configMap:
+            name: presto-config

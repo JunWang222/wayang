@@ -1,0 +1,37 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: presto-smoke
+  namespace: wayang-profiling
+spec:
+  suspend: true
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: wayang-presto-smoke
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: presto-client
+          image: wayang/presto-kubernetes-smoke:1.5.5.1
+          imagePullPolicy: Never
+          env:
+            - name: PRESTO_JDBC_URL
+              value: jdbc:presto://presto:8080/memory
+            - name: PRESTO_USER
+              value: wayang
+            - name: ROW_COUNT
+              value: "10000"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

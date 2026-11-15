@@ -18,7 +18,7 @@ workloads or experiment matrix.
 |---|---|---|
 | Spark | Driver Pod and configurable executor Pods | Validated in `../spark-kubernetes-setup` |
 | DuckDB | Embedded in one resource-limited Wayang Pod | Implemented here |
-| Presto | Coordinator and configurable worker Pods | Planned |
+| Presto | Coordinator and configurable worker Pods | Implemented here |
 | Trino | Coordinator, workers, and an Iceberg-compatible catalog | Planned |
 
 DuckDB is deliberately not deployed as a separate service. Wayang's DuckDB
@@ -51,3 +51,27 @@ WAYANG_DUCKDB_MEMORY_LIMIT=1Gi \
 This smoke workload validates the deployment and Wayang integration only. The
 existing `DuckDBCostPilotIT` should be used later when the team confirms the
 profiling workload and repetition policy.
+
+## Presto validation
+
+The Presto setup starts one coordinator and two workers by default, then runs
+the same deterministic Wayang smoke plan against the writable memory catalog:
+
+```bash
+./kubernetes-profiling-setup/bin/run-presto.sh
+```
+
+The worker count and per-role Kubernetes resources are configurable. For
+example:
+
+```bash
+WAYANG_PRESTO_WORKERS=3 \
+WAYANG_PRESTO_WORKER_CPU_LIMIT=2 \
+WAYANG_PRESTO_WORKER_MEMORY_LIMIT=3Gi \
+./kubernetes-profiling-setup/bin/run-presto.sh
+```
+
+This validates inter-Pod discovery, distributed execution, Wayang JDBC access,
+and metadata capture. It is not a final performance experiment. The memory
+catalog is intentionally ephemeral so every validation run creates its own
+fixture.
