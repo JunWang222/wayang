@@ -1,0 +1,38 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: trino-smoke
+  namespace: wayang-profiling
+spec:
+  suspend: true
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: wayang-trino-smoke
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: trino-client
+          image: wayang/trino-kubernetes-smoke:1.5.5.1
+          imagePullPolicy: Never
+          env:
+            - name: TRINO_JDBC_URL
+              value: jdbc:trino://trino:8080/memory
+            - name: TRINO_USER
+              value: wayang
+            - name: ROW_COUNT
+              value: "10000"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+

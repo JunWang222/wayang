@@ -20,9 +20,11 @@ kubectl set resources deployment/presto-coordinator --namespace "${NAMESPACE}" \
 kubectl set resources deployment/presto-worker --namespace "${NAMESPACE}" \
     --requests="cpu=${WAYANG_PRESTO_WORKER_CPU_REQUEST:-500m},memory=${WAYANG_PRESTO_WORKER_MEMORY_REQUEST:-1Gi}" \
     --limits="cpu=${WAYANG_PRESTO_WORKER_CPU_LIMIT:-1},memory=${WAYANG_PRESTO_WORKER_MEMORY_LIMIT:-2Gi}"
-kubectl rollout status deployment/presto-coordinator --namespace "${NAMESPACE}" \
-    --timeout="${WAYANG_K8S_TIMEOUT_SECONDS:-900}s"
+kubectl rollout restart deployment/presto-worker --namespace "${NAMESPACE}"
 kubectl rollout status deployment/presto-worker --namespace "${NAMESPACE}" \
+    --timeout="${WAYANG_K8S_TIMEOUT_SECONDS:-900}s"
+kubectl rollout restart deployment/presto-coordinator --namespace "${NAMESPACE}"
+kubectl rollout status deployment/presto-coordinator --namespace "${NAMESPACE}" \
     --timeout="${WAYANG_K8S_TIMEOUT_SECONDS:-900}s"
 
 kubectl delete job presto-smoke --namespace "${NAMESPACE}" --ignore-not-found

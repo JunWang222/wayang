@@ -19,7 +19,7 @@ workloads or experiment matrix.
 | Spark | Driver Pod and configurable executor Pods | Validated in `../spark-kubernetes-setup` |
 | DuckDB | Embedded in one resource-limited Wayang Pod | Implemented here |
 | Presto | Coordinator and configurable worker Pods | Implemented here |
-| Trino | Coordinator, workers, and an Iceberg-compatible catalog | Planned |
+| Trino | Coordinator and configurable worker Pods | Implemented here |
 
 DuckDB is deliberately not deployed as a separate service. Wayang's DuckDB
 platform uses the embedded JDBC driver, so the reproducible unit is the Wayang
@@ -75,3 +75,20 @@ This validates inter-Pod discovery, distributed execution, Wayang JDBC access,
 and metadata capture. It is not a final performance experiment. The memory
 catalog is intentionally ephemeral so every validation run creates its own
 fixture.
+
+## Trino validation
+
+The Trino smoke environment uses the official pinned Trino image, one
+coordinator, configurable workers, and the writable memory connector:
+
+```bash
+./kubernetes-profiling-setup/bin/run-trino.sh
+```
+
+Set `WAYANG_TRINO_WORKERS` and the corresponding
+`WAYANG_TRINO_WORKER_*`/`WAYANG_TRINO_COORDINATOR_*` variables to change the
+topology and resource limits. This validates the Kubernetes and Wayang
+integration without introducing an external metastore. The existing full
+`TrinoOperatorsIT` and `TrinoCostPilotIT` suites use Iceberg/Parquet, so an
+Iceberg catalog and object-store profile should be added only when that is the
+confirmed experiment storage model.
