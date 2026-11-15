@@ -1080,6 +1080,9 @@
                         <inputExclude>spark-kubernetes-setup/.build/**</inputExclude>
                         <inputExclude>spark-kubernetes-setup/.tools/**</inputExclude>
                         <inputExclude>spark-kubernetes-setup/artifacts/**</inputExclude>
+                        <inputExclude>kubernetes-profiling-setup/.build/**</inputExclude>
+                        <inputExclude>kubernetes-profiling-setup/.tools/**</inputExclude>
+                        <inputExclude>kubernetes-profiling-setup/artifacts/**</inputExclude>
 
                         <!-- Eclipse related files -->
                         <inputExclude>**/.project</inputExclude>

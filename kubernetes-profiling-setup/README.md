@@ -1,0 +1,53 @@
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements. See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0.
+-->
+
+# Reproducible Kubernetes profiling environments
+
+This directory extends the existing Spark proof of concept with reproducible
+platform-specific environments for DuckDB, Presto, and Trino. It is an
+infrastructure and validation foundation; it does not define the paper's final
+workloads or experiment matrix.
+
+## Current status
+
+| Platform | Kubernetes execution model | Status |
+|---|---|---|
+| Spark | Driver Pod and configurable executor Pods | Validated in `../spark-kubernetes-setup` |
+| DuckDB | Embedded in one resource-limited Wayang Pod | Implemented here |
+| Presto | Coordinator and configurable worker Pods | Planned |
+| Trino | Coordinator, workers, and an Iceberg-compatible catalog | Planned |
+
+DuckDB is deliberately not deployed as a separate service. Wayang's DuckDB
+platform uses the embedded JDBC driver, so the reproducible unit is the Wayang
+Pod, its image, resource limits, database path, input size, and run metadata.
+
+## DuckDB validation
+
+Prerequisites: Docker, `kubectl`, Java 17, and minikube. Then run:
+
+```bash
+./kubernetes-profiling-setup/bin/run-duckdb.sh
+```
+
+The default validation creates 10,000 deterministic rows, executes a Wayang
+`TableSource -> Filter -> TableSink` plan entirely on DuckDB, verifies the
+result, and writes logs plus Kubernetes metadata under `artifacts/`.
+
+The following environment variables control the run:
+
+```bash
+WAYANG_DUCKDB_ROWS=50000 \
+WAYANG_DUCKDB_CPU_REQUEST=500m \
+WAYANG_DUCKDB_CPU_LIMIT=1 \
+WAYANG_DUCKDB_MEMORY_REQUEST=512Mi \
+WAYANG_DUCKDB_MEMORY_LIMIT=1Gi \
+./kubernetes-profiling-setup/bin/run-duckdb.sh
+```
+
+This smoke workload validates the deployment and Wayang integration only. The
+existing `DuckDBCostPilotIT` should be used later when the team confirms the
+profiling workload and repetition policy.
